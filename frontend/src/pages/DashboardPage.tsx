@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useUniverseStore } from '../stores/universeStore'
 import { useAuthStore } from '../stores/authStore'
@@ -15,8 +15,36 @@ export default function DashboardPage() {
   const [genre, setGenre] = useState('sci-fi')
   const [format, setFormat] = useState('novel')
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
 
   useEffect(() => { fetchUniverses() }, [])
+
+  const handleEdit = async (e: MouseEvent, id: string, currentName: string) => {
+    e.stopPropagation()
+    const newName = window.prompt('Rename universe', currentName)
+    if (!newName || !newName.trim() || newName.trim() === currentName) return
+    try {
+      await api.updateUniverse(id, { name: newName.trim() })
+      await fetchUniverses()
+    } catch (err) {
+      setSubmitError((err as Error).message || 'Failed to rename universe')
+    }
+  }
+
+  const handleDelete = async (e: MouseEvent, id: string, currentName: string) => {
+    e.stopPropagation()
+    if (!window.confirm(`Delete "${currentName}"? This cannot be undone.`)) return
+    try {
+      await api.deleteUniverse(id)
+      await fetchUniverses()
+    } catch (err) {
+      setSubmitError((err as Error).message || 'Failed to delete universe')
+    }
+  }
+
+  const filteredUniverses = universes.filter((u) =>
+    u.name.toLowerCase().includes(search.trim().toLowerCase())
+  )
 
   const handleCreate = async () => {
     if (!name.trim()) { setSubmitError('Name is required'); return }
@@ -72,6 +100,13 @@ export default function DashboardPage() {
         <h2 className={styles.mainHeading}>Your Universes</h2>
         <p className={styles.mainSub}>Worlds waiting for ink</p>
 
+        <input
+          className={styles.searchInput}
+          placeholder="Search universes…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+
         <div className={styles.headerRow}>
           {!showNewForm ? (
             <button
@@ -122,15 +157,37 @@ export default function DashboardPage() {
           <div className={styles.emptyCard}>
             <p>No universes yet. Your first world awaits.</p>
           </div>
+        ) : filteredUniverses.length === 0 ? (
+          <div className={styles.emptyCard}>
+            <p>No universes match "{search}".</p>
+          </div>
         ) : (
           <div className={styles.universeGrid}>
-            {universes.map((u) => (
+            {filteredUniverses.map((u) => (
               <div
                 key={u.id}
                 className={styles.universeCard}
                 onClick={() => navigate(`/universe/${u.id}`)}
               >
-                <h3 className={styles.cardTitle}>{u.name}</h3>
+                <div className={styles.cardHeader}>
+                  <h3 className={styles.cardTitle}>{u.name}</h3>
+                  <div className={styles.cardActions}>
+                    <button
+                      className={styles.cardActionBtn}
+                      onClick={(e) => handleEdit(e, u.id, u.name)}
+                      aria-label="Edit universe"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className={styles.cardActionBtnDanger}
+                      onClick={(e) => handleDelete(e, u.id, u.name)}
+                      aria-label="Delete universe"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
                 <div className={styles.cardMeta}>
                   <span className={styles.cardMetaItem}>{u.genre}</span>
                   <span className={styles.cardMetaItem}>{u.format}</span>

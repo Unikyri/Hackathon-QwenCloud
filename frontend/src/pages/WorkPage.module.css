@@ -1,8 +1,50 @@
 /* WorkPage — chapter cards */
 
-.wrap {
+.layout {
+  display: flex;
   min-height: 100vh;
   background: var(--paper-warm);
+}
+
+.statsBox {
+  width: 220px;
+  flex-shrink: 0;
+  padding: 32px 20px;
+  background: var(--card-bg);
+  border-right: 1px solid var(--card-border);
+}
+
+.statsHeading {
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 20px;
+}
+
+.statItem {
+  margin-bottom: 16px;
+}
+
+.statLabel {
+  font-family: var(--micro);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-40);
+  margin: 0 0 4px;
+}
+
+.statValue {
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0;
+}
+
+.wrap {
+  flex: 1;
   padding: 24px 32px;
 }
 
@@ -137,13 +179,18 @@
   color: var(--danger);
 }
 
-/* Chapter card */
+/* Chapter grid + cards */
+.chapterGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+
 .chapterCard {
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: 4px;
   padding: 16px 20px;
-  margin-bottom: 10px;
   cursor: pointer;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
@@ -153,12 +200,38 @@
   box-shadow: 0 1px 6px var(--ink-10);
 }
 
+.chapterCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
 .chapterTitle {
   font-family: var(--serif);
   font-size: 16px;
   font-weight: 600;
   color: var(--ink);
-  margin: 0 0 4px;
+  margin: 0;
+}
+
+.chapterStatus {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--ink-10);
+  color: var(--ink-60);
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.chapterStatus[data-status='analyzed'] {
+  background: var(--success);
+  color: var(--paper);
 }
 
 .chapterMeta {

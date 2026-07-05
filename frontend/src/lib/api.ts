@@ -58,6 +58,10 @@ export const api = {
   createUniverse: (data: any) =>
     request<{ universe: any }>('/universes', { method: 'POST', json: data }),
   getUniverse: (id: string) => request<{ universe: any }>(`/universes/${id}`),
+  updateUniverse: (id: string, data: any) =>
+    request<{ universe: any }>(`/universes/${id}`, { method: 'PUT', json: data }),
+  deleteUniverse: (id: string) =>
+    request<void>(`/universes/${id}`, { method: 'DELETE' }),
 
   // Works
   listWorks: (universeId: string) =>

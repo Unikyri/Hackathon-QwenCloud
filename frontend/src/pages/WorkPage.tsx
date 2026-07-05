@@ -15,6 +15,7 @@ interface Chapter {
   title: string
   order_index: number
   word_count: number
+  status: string
 }
 
 export default function WorkPage() {
@@ -65,57 +66,85 @@ export default function WorkPage() {
     return <p className={styles.error}>Error: {error}</p>
   }
 
+  const totalWords = chapters.reduce((sum, ch) => sum + ch.word_count, 0)
+  const analyzedCount = chapters.filter((ch) => ch.status === 'analyzed').length
+
   return (
-    <div className={styles.wrap}>
-      <button
-        className={styles.backBtn}
-        onClick={() => work?.universe_id ? navigate(`/universe/${work.universe_id}`) : navigate(-1)}
-      >
-        ← Back
-      </button>
+    <div className={styles.layout}>
+      <aside className={styles.statsBox}>
+        <h2 className={styles.statsHeading}>Project Stats</h2>
+        <div className={styles.statItem}>
+          <p className={styles.statLabel}>Chapters</p>
+          <p className={styles.statValue}>{chapters.length}</p>
+        </div>
+        <div className={styles.statItem}>
+          <p className={styles.statLabel}>Total Words</p>
+          <p className={styles.statValue}>{totalWords.toLocaleString()}</p>
+        </div>
+        <div className={styles.statItem}>
+          <p className={styles.statLabel}>Analyzed</p>
+          <p className={styles.statValue}>{analyzedCount} / {chapters.length}</p>
+        </div>
+      </aside>
 
-      <h1 className={styles.heading}>{work?.title || 'Untitled Work'}</h1>
-      {work?.type && <p className={styles.type}>{work.type}</p>}
+      <div className={styles.wrap}>
+        <button
+          className={styles.backBtn}
+          onClick={() => work?.universe_id ? navigate(`/universe/${work.universe_id}`) : navigate(-1)}
+        >
+          ← Back
+        </button>
 
-      <div className={styles.headerRow}>
-        <h2 className={styles.sectionHeading}>Chapters</h2>
-        {!showNewForm ? (
-          <button className={styles.newBtn} onClick={() => setShowNewForm(true)}>
-            + New Chapter
-          </button>
+        <h1 className={styles.heading}>{work?.title || 'Untitled Work'}</h1>
+        {work?.type && <p className={styles.type}>{work.type}</p>}
+
+        <div className={styles.headerRow}>
+          <h2 className={styles.sectionHeading}>Chapters</h2>
+          {!showNewForm ? (
+            <button className={styles.newBtn} onClick={() => setShowNewForm(true)}>
+              + New Chapter
+            </button>
+          ) : (
+            <div className={styles.inlineForm}>
+              <input
+                className={styles.formInput}
+                placeholder="Chapter title"
+                value={chapterTitle}
+                onChange={(e) => setChapterTitle(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreateChapter()}
+              />
+              <button className={styles.formSubmit} onClick={handleCreateChapter}>Create</button>
+              <button className={styles.formCancel} onClick={() => { setShowNewForm(false); setSubmitError(null) }}>Cancel</button>
+            </div>
+          )}
+          {submitError && <p className={styles.formError}>{submitError}</p>}
+        </div>
+        {chapters.length === 0 ? (
+          <p className={styles.empty}>No chapters yet.</p>
         ) : (
-          <div className={styles.inlineForm}>
-            <input
-              className={styles.formInput}
-              placeholder="Chapter title"
-              value={chapterTitle}
-              onChange={(e) => setChapterTitle(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreateChapter()}
-            />
-            <button className={styles.formSubmit} onClick={handleCreateChapter}>Create</button>
-            <button className={styles.formCancel} onClick={() => { setShowNewForm(false); setSubmitError(null) }}>Cancel</button>
+          <div className={styles.chapterGrid}>
+            {chapters
+              .sort((a, b) => a.order_index - b.order_index)
+              .map((ch) => (
+                <div
+                  key={ch.id}
+                  className={styles.chapterCard}
+                  onClick={() => navigate(`/editor/${ch.id}`)}
+                >
+                  <div className={styles.chapterCardHeader}>
+                    <h3 className={styles.chapterTitle}>{ch.title}</h3>
+                    <span className={styles.chapterStatus} data-status={ch.status}>
+                      {ch.status}
+                    </span>
+                  </div>
+                  <p className={styles.chapterMeta}>
+                    {ch.word_count > 0 ? `${ch.word_count} words` : 'Empty'}
+                  </p>
+                </div>
+              ))}
           </div>
         )}
-        {submitError && <p className={styles.formError}>{submitError}</p>}
       </div>
-      {chapters.length === 0 ? (
-        <p className={styles.empty}>No chapters yet.</p>
-      ) : (
-        chapters
-          .sort((a, b) => a.order_index - b.order_index)
-          .map((ch) => (
-            <div
-              key={ch.id}
-              className={styles.chapterCard}
-              onClick={() => navigate(`/editor/${ch.id}`)}
-            >
-              <h3 className={styles.chapterTitle}>{ch.title}</h3>
-              <p className={styles.chapterMeta}>
-                {ch.word_count > 0 ? `${ch.word_count} words` : 'Empty'}
-              </p>
-            </div>
-          ))
-      )}
     </div>
   )
 }
