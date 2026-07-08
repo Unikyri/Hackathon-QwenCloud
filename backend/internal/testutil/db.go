@@ -93,19 +93,25 @@ func RunMigrationsUpTo(t *testing.T, pool *pgxpool.Pool, maxPrefix string) {
 	if err != nil {
 		t.Fatalf("acquire dedicated connection for migration lock: %v", err)
 	}
-	defer func() {
-		// Explicit unlock is required: pgxpool reuses the physical connection,
-		// and a session-level lock persists across Release(), which would
-		// deadlock the next acquirer reusing this same connection.
-		_, _ = conn.Exec(ctx, `SELECT pg_advisory_unlock(hashtext('quill_test_migrations'))`)
-		conn.Release()
-	}()
 
-	lockCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	lockCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	if _, err := conn.Exec(lockCtx, `SELECT pg_advisory_lock(hashtext('quill_test_migrations'))`); err != nil {
+		conn.Release()
 		t.Fatalf("acquire migration advisory lock: %v", err)
 	}
+
+	// Hold the lock (and its dedicated connection) for the WHOLE test, not just
+	// this teardown+setup critical section — released via t.Cleanup so it
+	// survives until the test body (which shares schema state with whatever
+	// ran here) has finished. Explicit unlock before Release is required:
+	// pgxpool reuses the physical connection, and a session-level lock
+	// persists across Release(), which would deadlock the next acquirer
+	// reusing this same connection.
+	t.Cleanup(func() {
+		_, _ = conn.Exec(ctx, `SELECT pg_advisory_unlock(hashtext('quill_test_migrations'))`)
+		conn.Release()
+	})
 
 	// Reset state by tearing down all known migrations in reverse order.
 	// Down migrations silently ignore errors — the DB may not have the state yet.

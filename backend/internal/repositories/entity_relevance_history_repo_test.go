@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -51,7 +52,7 @@ func TestEntityRelevanceHistoryRepoListRecentByUniverseCapsAt30(t *testing.T) {
 		score := 0.5 + float64(i)*0.01
 		_, err := pool.Exec(ctx,
 			"INSERT INTO entity_relevance_history (id, entity_id, universe_id, relevance_score, status, recorded_at) VALUES ($1,$2,$3,$4,$5, NOW() + ($6 || ' seconds')::interval)",
-			uuid.New(), entity.ID, universe.ID, score, "active", i)
+			uuid.New(), entity.ID, universe.ID, score, "active", strconv.Itoa(i))
 		if err != nil {
 			t.Fatalf("seed history row %d: %v", i, err)
 		}

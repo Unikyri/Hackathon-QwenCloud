@@ -420,7 +420,7 @@ func TestMigrationIdempotency(t *testing.T) {
 	}
 
 	// Re-run migration 014 seed data directly
-	sql, err := readMigrationFile("../migrations/014_seed_demo_saga.up.sql")
+	sql, err := readMigrationFile("../../migrations/014_seed_demo_saga.up.sql")
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
 	}

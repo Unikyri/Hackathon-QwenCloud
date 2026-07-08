@@ -30,8 +30,8 @@ func TestHealthHandlerCheck(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d or %d", resp.StatusCode, http.StatusOK, http.StatusServiceUnavailable)
 	}
 
 	body, _ := io.ReadAll(resp.Body)

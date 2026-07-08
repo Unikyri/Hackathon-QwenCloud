@@ -24,6 +24,19 @@ func TestIngestionRepoCRUD(t *testing.T) {
 	workID := uuid.New()
 	filename := "test_document.md"
 
+	// Parent rows required by ingestion_jobs' NOT NULL FKs to universes/works.
+	user := createTestUser(t, ctx, pool)
+	if _, err := pool.Exec(ctx,
+		"INSERT INTO universes (id, user_id, name, format) VALUES ($1,$2,$3,$4)",
+		universeID, user.ID, "Ingestion Test Universe", "novel"); err != nil {
+		t.Fatalf("insert universe: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		"INSERT INTO works (id, universe_id, title, type) VALUES ($1,$2,$3,$4)",
+		workID, universeID, "Test Work", "novel"); err != nil {
+		t.Fatalf("insert work: %v", err)
+	}
+
 	// Create
 	err := repo.Create(ctx, jobID, universeID, workID, "pending", filename)
 	if err != nil {

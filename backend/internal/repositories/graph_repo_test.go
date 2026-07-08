@@ -62,10 +62,11 @@ func setupGraphTest(t *testing.T, pool *pgxpool.Pool) (string, string, string) {
 	ctx := context.Background()
 	repo := NewGraphRepo(pool)
 
-	graphName := "universe_" + uuid.NewString()
-	if err := repo.CreateGraph(ctx, graphName); err != nil {
+	uid := uuid.NewString()
+	if err := repo.CreateGraph(ctx, uid); err != nil {
 		t.Fatalf("CreateGraph: %v", err)
 	}
+	graphName := "universe_" + uid
 
 	e1 := uuid.NewString()
 	e2 := uuid.NewString()
@@ -225,8 +226,9 @@ func TestGraphRepoEdgeCRUD(t *testing.T) {
 	}
 	ctx := context.Background()
 	repo := NewGraphRepo(pool)
-	graphName := "universe_" + uuid.NewString()
-	repo.CreateGraph(ctx, graphName)
+	uid := uuid.NewString()
+	repo.CreateGraph(ctx, uid)
+	graphName := "universe_" + uid
 
 	e1 := uuid.NewString()
 	e2 := uuid.NewString()
@@ -276,10 +278,11 @@ func TestGraphRepoGetNeighborsBatch(t *testing.T) {
 	}
 	ctx := context.Background()
 	repo := NewGraphRepo(pool)
-	graphName := "universe_" + uuid.NewString()
-	if err := repo.CreateGraph(ctx, graphName); err != nil {
+	uid := uuid.NewString()
+	if err := repo.CreateGraph(ctx, uid); err != nil {
 		t.Fatalf("CreateGraph: %v", err)
 	}
+	graphName := "universe_" + uid
 
 	e1 := uuid.NewString()
 	e2 := uuid.NewString()

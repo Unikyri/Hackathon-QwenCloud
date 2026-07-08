@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -119,7 +120,11 @@ func TestE2EFullFlow(t *testing.T) {
 	checkEndpoint("plot holes", "GET", "/api/v1/plot-holes?universe_id="+universeID, "")
 	checkEndpoint("graph", "GET", "/api/v1/graph?universe_id="+universeID, "")
 	checkEndpoint("neighbors", "GET", "/api/v1/entities/00000000-0000-4000-8000-000000000001/neighbors?universe_id="+universeID, "")
-	checkEndpoint("recall", "POST", "/api/v1/universes/"+universeID+"/recall", `{"query":"hero","k":5}`)
+	if os.Getenv("QWEN_API_KEY") != "" {
+		checkEndpoint("recall", "POST", "/api/v1/universes/"+universeID+"/recall", `{"query":"hero","k":5}`)
+	} else {
+		t.Log("skipping recall assertion: QWEN_API_KEY not set")
+	}
 }
 
 func setupE2EApp(t *testing.T) (*pgxpool.Pool, *fiber.App) {
@@ -147,6 +152,8 @@ func setupE2EApp(t *testing.T) (*pgxpool.Pool, *fiber.App) {
 		PlotHoleChapters:           8,
 		MaxContradictionCandidates: 3,
 		WSEnabled:                  false,
+		QwenMaxConcurrency:         1,
+		QwenTurboConcurrency:       1,
 	}
 
 	userRepo := repositories.NewUserRepo(pool)

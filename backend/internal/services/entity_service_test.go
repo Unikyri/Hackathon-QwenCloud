@@ -40,7 +40,8 @@ func TestResolveOrCreateNewEntityAppendsHistoryRow(t *testing.T) {
 	universe := svcCreateTestUniverse(t, ctx, pool, user.ID)
 
 	entityRepo := repositories.NewEntityRepo(pool)
-	entitySvc := NewEntityService(pool, entityRepo, nil, qwenSvc)
+	vectorRepo := repositories.NewVectorRepo(pool)
+	entitySvc := NewEntityService(pool, entityRepo, vectorRepo, qwenSvc)
 
 	entity, previousStatus, isNew, err := entitySvc.ResolveOrCreate(ctx, universe.ID, repositories.ExtractedEntity{
 		Type: "character", Name: "Brand New Wizard",
