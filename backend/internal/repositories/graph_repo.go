@@ -76,15 +76,23 @@ func (r *GraphRepo) withAgeConn(ctx context.Context, fn func(conn *pgx.Conn) err
 	if err != nil {
 		return fmt.Errorf("acquire conn: %w", err)
 	}
-	defer conn.Release()
 	c := conn.Conn()
 	if _, err := c.Exec(ctx, "LOAD 'age'"); err != nil {
+		conn.Release()
 		return fmt.Errorf("load age: %w", err)
 	}
 	if _, err := c.Exec(ctx, `SET search_path = ag_catalog, "$user", public`); err != nil {
+		conn.Release()
 		return fmt.Errorf("set search_path: %w", err)
 	}
-	return fn(c)
+	err = fn(c)
+	// Reset search_path before returning the connection to the pool so
+	// subsequent unqualified queries resolve to public.*, not ag_catalog.*.
+	// ponytail: one SET per AGE call is cheaper than schema-qualifying every
+	// repo query; revert if connection pinning becomes preferred.
+	_, _ = c.Exec(ctx, `SET search_path = "$user", public`)
+	conn.Release()
+	return err
 }
 
 func (r *GraphRepo) CreateGraph(ctx context.Context, universeID string) error {

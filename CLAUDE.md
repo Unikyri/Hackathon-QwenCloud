@@ -30,6 +30,13 @@ docker compose up -d        # postgres + migrations + backend + frontend
 - Integration tests (repository/handler tests touching Postgres) require `TEST_DATABASE_URL` to be set; without it they call `t.Skip` (see `internal/testutil/db.go`). Point it at a Postgres instance with `pgvector` + `age` extensions available — `docker compose up postgres` provides one.
 - `testutil.RunMigrationsUpTo` tears down and reapplies migrations per test run, and skips migration `014` automatically if the AGE extension isn't loaded on the target DB.
 
+### Reproduction
+
+- Full memory evaluation harness (needs Postgres + AGE, and `QWEN_API_KEY` for semantic recall/consolidation tests):  
+  `TEST_DATABASE_URL=postgres://quill:quill_dev_password@localhost:5432/quill?sslmode=disable QWEN_API_KEY=your_key go test ./backend/eval/ -run TestMemoryEval -v`
+- Metrics-only smoke tests (no DB):  
+  `go test ./backend/eval/ -run 'TestRecall|TestPrecision|TestMRR|TestNDCG' -v`
+
 ### Frontend (from `frontend/`)
 - Dev server: `npm run dev`
 - Build (typecheck + build): `npm run build`

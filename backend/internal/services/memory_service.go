@@ -187,6 +187,51 @@ func (s *MemoryService) RecallWithQuery(ctx context.Context, universeID uuid.UUI
 	return s.toRecallItems(fused), nil
 }
 
+// RecallWithPipelines runs only the named pipelines from the given set,
+// fuses them via RRF, and returns the result. Pipeline names: "vector",
+// "graph", "recency", "keyword", "consolidated". If pipelines is empty
+// or nil, runs all five (equivalent to RecallWithQuery, minus budget
+// fitting). Unknown pipeline names are silently ignored.
+//
+// ponytail: always runs all 5 pipelines via runPipelines even when only
+// one is requested — acceptable for small-corpus ablation. Upgrade to
+// per-pipeline execution if ablation cost becomes a concern.
+func (s *MemoryService) RecallWithPipelines(ctx context.Context, universeID uuid.UUID, queryEmbedding []float32, queryText string, k int, pipelines []string) ([]models.RecallItem, error) {
+	ps, err := s.runPipelines(ctx, universeID, queryEmbedding, queryText, k)
+	if err != nil {
+		return nil, err
+	}
+
+	all := map[string][]rankedEntry{
+		"vector":       ps.Vector,
+		"graph":        ps.Graph,
+		"recency":      ps.Recency,
+		"keyword":      ps.Keyword,
+		"consolidated": ps.Consolidated,
+	}
+
+	var selected [][]rankedEntry
+	if len(pipelines) == 0 {
+		selected = [][]rankedEntry{ps.Vector, ps.Graph, ps.Recency, ps.Keyword, ps.Consolidated}
+	} else {
+		order := []string{"vector", "graph", "recency", "keyword", "consolidated"}
+		for _, name := range order {
+			for _, p := range pipelines {
+				if p == name {
+					selected = append(selected, all[name])
+					break
+				}
+			}
+		}
+	}
+
+	fused := fuseRRF(selected...)
+	if k > 0 && len(fused) > k {
+		fused = fused[:k]
+	}
+	return s.toRecallItems(fused), nil
+}
+
 // runPipelines fans out the vector, graph, recency, keyword, and
 // consolidated-memory pipelines for a recall query, honoring the same
 // normal/degraded-mode seeding and nil-guard rules as RecallWithQuery (see

@@ -292,3 +292,58 @@ func TestMemoryServiceRecallExplainBudgetMarking(t *testing.T) {
 		t.Error("expected at least one item to exceed the tiny budget (FitInBudget=false)")
 	}
 }
+
+// TestMemoryServiceRecallWithPipelinesFilters verifies that
+// RecallWithPipelines filters by pipeline name correctly.
+func TestMemoryServiceRecallWithPipelinesFilters(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "019")
+	ctx := context.Background()
+
+	user := svcCreateTestUser(t, ctx, pool)
+	universe := svcCreateTestUniverse(t, ctx, pool, user.ID)
+	svcCreateTestEntity(t, ctx, pool, universe.ID, "Entity A", 0.9, "active")
+	svcCreateTestEntity(t, ctx, pool, universe.ID, "Entity B", 0.5, "active")
+
+	entityRepo := repositories.NewEntityRepo(pool)
+	graphRepo := repositories.NewGraphRepo(pool)
+	vectorRepo := repositories.NewVectorRepo(pool)
+	svc := NewMemoryService(graphRepo, entityRepo, vectorRepo)
+
+	all, err := svc.RecallWithPipelines(ctx, universe.ID, nil, "", 10, nil)
+	if err != nil {
+		t.Fatalf("RecallWithPipelines(nil) failed: %v", err)
+	}
+	if len(all) == 0 {
+		t.Fatal("nil pipelines should return results in degraded mode")
+	}
+
+	recency, err := svc.RecallWithPipelines(ctx, universe.ID, nil, "", 10, []string{"recency"})
+	if err != nil {
+		t.Fatalf("RecallWithPipelines(recency) failed: %v", err)
+	}
+	if len(recency) == 0 {
+		t.Fatal("recency pipeline should return entities")
+	}
+	for _, item := range recency {
+		if item.Source != "recency" {
+			t.Errorf("expected only recency source, got %q", item.Source)
+		}
+	}
+
+	empty, err := svc.RecallWithPipelines(ctx, universe.ID, nil, "", 10, []string{})
+	if err != nil {
+		t.Fatalf("RecallWithPipelines(empty) failed: %v", err)
+	}
+	if len(all) != len(empty) {
+		t.Errorf("empty pipeline list should match nil: got %d, want %d", len(empty), len(all))
+	}
+
+	filtered, err := svc.RecallWithPipelines(ctx, universe.ID, nil, "", 10, []string{"bogus"})
+	if err != nil {
+		t.Fatalf("RecallWithPipelines(bogus) failed: %v", err)
+	}
+	if len(filtered) != 0 {
+		t.Errorf("bogus pipeline name should produce empty result, got %d", len(filtered))
+	}
+}

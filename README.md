@@ -37,6 +37,11 @@ cd frontend && npm run dev
 
 # Database only
 docker compose up postgres
+
+# Memory evaluation harness (needs Postgres + AGE; QWEN_API_KEY for semantic tests)
+cd backend
+TEST_DATABASE_URL=postgres://quill:quill_dev_password@localhost:5432/quill?sslmode=disable \
+  QWEN_API_KEY=your_key go test ./eval/ -run TestMemoryEval -v
 ```
 
 ## Tech Stack
