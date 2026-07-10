@@ -7,8 +7,12 @@ import IngestPage from '../IngestPage'
 vi.mock('../IngestPage.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
 
 const mockIngestDocument = vi.fn()
+const mockListIngestionJobs = vi.fn()
 vi.mock('../../lib/api', () => ({
-  api: { ingestDocument: (...args: unknown[]) => mockIngestDocument(...args) },
+  api: {
+    ingestDocument: (...args: unknown[]) => mockIngestDocument(...args),
+    listIngestionJobs: (...args: unknown[]) => mockListIngestionJobs(...args),
+  },
 }))
 
 const mockConnect = vi.fn()
@@ -26,13 +30,6 @@ vi.mock('../../hooks/useWS', () => ({
   useWS: () => ({ status: 'open' }),
 }))
 
-vi.mock('../../stores/authStore', () => ({
-  useAuthStore: (selector: (s: unknown) => unknown) => {
-    const state = { token: 'test-token' }
-    return selector ? selector(state) : state
-  },
-}))
-
 function renderPage(universeId = 'uni-1') {
   return render(
     <MemoryRouter initialEntries={[`/universe/${universeId}/ingest`]}>
@@ -47,6 +44,7 @@ describe('IngestPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockIngestionProgress = {}
+    mockListIngestionJobs.mockResolvedValue({ jobs: [] })
   })
 
   it('renders the dropzone', () => {
@@ -82,6 +80,64 @@ describe('IngestPage', () => {
     })
   })
 
+  it('hydrates persisted jobs from the GET endpoint on mount', async () => {
+    mockListIngestionJobs.mockResolvedValue({
+      jobs: [
+        {
+          id: 'job-9',
+          universe_id: 'uni-1',
+          work_id: 'work-1',
+          filename: 'persisted.md',
+          status: 'completed',
+          total_chapters_detected: 3,
+          chapters_processed: 3,
+          entities_extracted: 12,
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+    renderPage()
+
+    await waitFor(() => {
+      expect(mockListIngestionJobs).toHaveBeenCalledWith('uni-1')
+      expect(screen.getByText('persisted.md')).toBeInTheDocument()
+      expect(screen.getByText('Completed')).toBeInTheDocument()
+    })
+  })
+
+  it('shows the existing job instead of a new card on a duplicate upload', async () => {
+    mockIngestDocument.mockResolvedValue({ job_id: 'job-9', status: 'duplicate' })
+    renderPage()
+    await waitFor(() => expect(mockListIngestionJobs).toHaveBeenCalledTimes(1))
+
+    mockListIngestionJobs.mockResolvedValue({
+      jobs: [
+        {
+          id: 'job-9',
+          universe_id: 'uni-1',
+          work_id: 'work-1',
+          filename: 'manuscript.md',
+          status: 'completed',
+          total_chapters_detected: 3,
+          chapters_processed: 3,
+          entities_extracted: 12,
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+
+    const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
+    const file = new File(['# Chapter 1'], 'manuscript.md', { type: 'text/markdown' })
+    const user = userEvent.setup()
+    await user.upload(input, file)
+
+    await waitFor(() => {
+      expect(mockListIngestionJobs).toHaveBeenCalledTimes(2)
+      expect(screen.getAllByText('manuscript.md')).toHaveLength(1)
+      expect(screen.getByText('Completed')).toBeInTheDocument()
+    })
+  })
+
   it('shows live progress and step checklist from ingestion_progress WS state', async () => {
     mockIngestDocument.mockResolvedValue({ job_id: 'job-1', status: 'accepted' })
     mockIngestionProgress = {
@@ -99,10 +155,10 @@ describe('IngestPage', () => {
     })
   })
 
-  it('marks the job Completed once processed chapters reach the total', async () => {
+  it('marks the job Completed when the terminal WS status arrives', async () => {
     mockIngestDocument.mockResolvedValue({ job_id: 'job-1', status: 'accepted' })
     mockIngestionProgress = {
-      'job-1': { job_id: 'job-1', status: 'running', chapters_processed: 4, total_chapters: 4 },
+      'job-1': { job_id: 'job-1', status: 'completed', chapters_processed: 4, total_chapters: 4 },
     }
     renderPage()
     const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
@@ -116,10 +172,10 @@ describe('IngestPage', () => {
     })
   })
 
-  it('marks an empty-file job (total_chapters: 0) Completed immediately, not stuck as Processing', async () => {
+  it('marks an empty-document job (total_chapters: 0) Completed on the terminal WS status', async () => {
     mockIngestDocument.mockResolvedValue({ job_id: 'job-1', status: 'accepted' })
     mockIngestionProgress = {
-      'job-1': { job_id: 'job-1', status: 'running', chapters_processed: 0, total_chapters: 0 },
+      'job-1': { job_id: 'job-1', status: 'completed', chapters_processed: 0, total_chapters: 0 },
     }
     renderPage()
     const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
@@ -133,12 +189,49 @@ describe('IngestPage', () => {
     })
   })
 
-  it('offers a "Check status" fallback for a job stuck Processing, which forces a WS reconnect', async () => {
+  it('does not drop a just-uploaded job when the initial fetch resolves late', async () => {
+    let resolveFetch!: (v: { jobs: unknown[] }) => void
+    mockListIngestionJobs.mockReturnValue(new Promise((r) => { resolveFetch = r }))
+    mockIngestDocument.mockResolvedValue({ job_id: 'job-new', status: 'accepted' })
+    renderPage()
+
+    const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
+    const file = new File(['# Chapter 1'], 'fresh.md', { type: 'text/markdown' })
+    const user = userEvent.setup()
+    await user.upload(input, file)
+    await waitFor(() => expect(screen.getByText('fresh.md')).toBeInTheDocument())
+
+    resolveFetch({
+      jobs: [
+        {
+          id: 'job-old',
+          universe_id: 'uni-1',
+          work_id: 'work-1',
+          filename: 'old.md',
+          status: 'completed',
+          total_chapters_detected: 1,
+          chapters_processed: 1,
+          entities_extracted: 2,
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('old.md')).toBeInTheDocument()
+      // The optimistic card from the racing upload must survive the merge.
+      expect(screen.getByText('fresh.md')).toBeInTheDocument()
+    })
+  })
+
+  it('offers a "Check status" fallback for a job stuck Processing, which re-fetches the job list', async () => {
     mockIngestDocument.mockResolvedValue({ job_id: 'job-1', status: 'accepted' })
     mockIngestionProgress = {
       'job-1': { job_id: 'job-1', status: 'running', chapters_processed: 2, total_chapters: 4 },
     }
     renderPage()
+    await waitFor(() => expect(mockListIngestionJobs).toHaveBeenCalledTimes(1))
+
     const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
     const file = new File(['# Chapter 1'], 'manuscript.md', { type: 'text/markdown' })
 
@@ -148,6 +241,6 @@ describe('IngestPage', () => {
     const checkStatusBtn = await screen.findByText('Check status')
     await user.click(checkStatusBtn)
 
-    expect(mockConnect).toHaveBeenCalledWith('test-token')
+    expect(mockListIngestionJobs).toHaveBeenCalledTimes(2)
   })
 })

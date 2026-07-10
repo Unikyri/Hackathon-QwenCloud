@@ -44,7 +44,11 @@ export default function BudgetTheater({ budget, items }: BudgetTheaterProps) {
               <div className={styles.barTrack}>
                 <div className={styles.barFill} style={{ width: `${pct}%` }} />
               </div>
-              <span className={styles.barValue}>{value.toLocaleString()} tok</span>
+              <span className={styles.barValue}>
+                {key === 'vector_tokens'
+                  ? `${(budget.vector_tokens_used ?? 0).toLocaleString()} / ${value.toLocaleString()} tok`
+                  : `${value.toLocaleString()} tok`}
+              </span>
             </div>
           )
         })}

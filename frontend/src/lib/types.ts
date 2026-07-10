@@ -46,6 +46,25 @@ export interface RecallBudget {
   vector_tokens: number
   tools_tokens: number
   used_percent: number
+  vector_tokens_used: number
+}
+
+// Mirrors backend models.IngestionJob JSON tags (models.go).
+export interface IngestionJobDTO {
+  id: string
+  universe_id: string
+  work_id: string
+  filename?: string
+  file_type?: string
+  status: string
+  total_chapters_detected: number
+  chapters_processed: number
+  entities_extracted: number
+  content_hash?: string
+  error_message?: string
+  started_at?: string
+  completed_at?: string
+  created_at: string
 }
 
 export interface RecallExplanation {

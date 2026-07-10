@@ -105,6 +105,16 @@ function WorkDetail({ workId, universeId, onBack }: { workId: string; universeId
     try { await api.updateChapter(chId, { title }) } catch { fetchData() }
   }
 
+  const handleDeleteChapter = async (ch: Chapter) => {
+    if (!window.confirm(`Delete chapter "${ch.title}"? This cannot be undone.`)) return
+    try {
+      await api.deleteChapter(ch.id)
+      fetchData()
+    } catch (err) {
+      alert((err as Error).message)
+    }
+  }
+
   if (loading) return <div className={styles.loading}>Loading…</div>
   if (error) return <div className={styles.error}>Error: {error}</div>
 
@@ -247,13 +257,22 @@ function WorkDetail({ workId, universeId, onBack }: { workId: string; universeId
                   <StatusChip status={ch.status} />
                 </span>
                 <span className={styles.colEdited}>{relativeTime(ch.updated_at)}</span>
-                <button
-                  className={styles.colRenameBtn}
-                  aria-label="Rename chapter"
-                  onClick={() => { setRenamingChapterId(ch.id); setChapterTitleDraft(ch.title) }}
-                >
-                  <span className="glyph">✎</span>
-                </button>
+                <span>
+                  <button
+                    className={styles.colRenameBtn}
+                    aria-label="Rename chapter"
+                    onClick={() => { setRenamingChapterId(ch.id); setChapterTitleDraft(ch.title) }}
+                  >
+                    <span className="glyph">✎</span>
+                  </button>
+                  <button
+                    className={styles.colRenameBtn}
+                    aria-label="Delete chapter"
+                    onClick={() => handleDeleteChapter(ch)}
+                  >
+                    <span className="glyph">🗑</span>
+                  </button>
+                </span>
               </div>
             ))}
           </>
@@ -291,6 +310,17 @@ export default function UniverseWorksTab() {
       setSelectedWorkId(work.id)
     } catch (err) {
       setSubmitError((err as Error).message || 'Failed to create work')
+    }
+  }
+
+  const handleDeleteWork = async (w: { id: string; title: string }) => {
+    if (!window.confirm(`Delete "${w.title}" and all its chapters? This cannot be undone.`)) return
+    try {
+      await api.deleteWork(w.id)
+      await refetchWorks()
+      if (selectedWorkId === w.id) setSelectedWorkId(null)
+    } catch (err) {
+      alert((err as Error).message)
     }
   }
 
@@ -360,6 +390,13 @@ export default function UniverseWorksTab() {
             >
               <div className={styles.workCardType}>{w.type}</div>
               <h3 className={styles.workCardTitle}>{w.title}</h3>
+              <button
+                aria-label="Delete work"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, alignSelf: 'flex-end' }}
+                onClick={(e) => { e.stopPropagation(); handleDeleteWork(w) }}
+              >
+                <span className="glyph">🗑</span>
+              </button>
             </div>
           ))}
         </div>

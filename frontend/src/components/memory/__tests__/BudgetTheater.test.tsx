@@ -10,6 +10,7 @@ const budget: RecallBudget = {
   vector_tokens: 300,
   tools_tokens: 100,
   used_percent: 60,
+  vector_tokens_used: 120,
 }
 
 const items: ExplainedItem[] = [

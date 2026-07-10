@@ -1,4 +1,4 @@
-import type { MemoryStatusEntity, RecallExplanation } from './types'
+import type { IngestionJobDTO, MemoryStatusEntity, RecallExplanation } from './types'
 
 const API_BASE = '/api/v1'
 
@@ -73,6 +73,8 @@ export const api = {
     request<{ work: any }>(`/universes/${universeId}/works`, { method: 'POST', json: data }),
   updateWork: (id: string, data: any) =>
     request<{ work: any }>(`/works/${id}`, { method: 'PUT', json: data }),
+  deleteWork: (id: string) =>
+    request<void>(`/works/${id}`, { method: 'DELETE' }),
 
   // Chapters
   listChapters: (workId: string) =>
@@ -82,6 +84,8 @@ export const api = {
   getChapter: (id: string) => request<{ chapter: any }>(`/chapters/${id}`),
   updateChapter: (id: string, data: any) =>
     request<{ chapter: any }>(`/chapters/${id}`, { method: 'PUT', json: data }),
+  deleteChapter: (id: string) =>
+    request<void>(`/chapters/${id}`, { method: 'DELETE' }),
 
   // Entities
   listEntities: (universeId: string, params?: Record<string, string>) => {
@@ -185,4 +189,7 @@ export const api = {
     }
     return res.json() as Promise<{ job_id: string; status: string }>
   },
+
+  listIngestionJobs: (universeId: string) =>
+    request<{ jobs: IngestionJobDTO[] }>(`/universes/${universeId}/ingestions`),
 }
