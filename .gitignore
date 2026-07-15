@@ -39,3 +39,4 @@ backend/*.test
 # Prototype / Design mockups
 QuillNewFront/
 
+.codex/
