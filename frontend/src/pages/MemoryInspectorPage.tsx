@@ -3,6 +3,7 @@ import { useState } from 'react'
 import DecayTimeline from '../components/memory/DecayTimeline'
 import FusionExplorer from '../components/memory/FusionExplorer'
 import BudgetTheater from '../components/memory/BudgetTheater'
+import WriterMemoryPanel from '../components/memory/WriterMemoryPanel'
 import type { RecallExplanation } from '../lib/types'
 import styles from './MemoryInspectorPage.module.css'
 
@@ -20,6 +21,7 @@ export default function MemoryInspectorPage() {
       <DecayTimeline universeId={universeId} />
       <FusionExplorer universeId={universeId} onResult={setRecall} />
       <BudgetTheater budget={recall?.budget ?? null} items={recall?.items ?? []} />
+      <WriterMemoryPanel universeId={universeId} />
     </div>
   )
 }

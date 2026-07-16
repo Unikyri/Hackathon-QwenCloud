@@ -12,6 +12,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
+	"github.com/quill/backend/internal/models"
 	"github.com/quill/backend/internal/repositories"
 	"github.com/quill/backend/internal/services"
 )
@@ -172,6 +173,50 @@ func TestGraphHandlerRecallEmbedsNonEmptyQuery(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("expected embed failure to surface as 500, got %d", resp.StatusCode)
+	}
+}
+
+type fakeUniverseOwnerResolver struct {
+	universe *models.Universe
+}
+
+func (f fakeUniverseOwnerResolver) FindByID(_ context.Context, _ uuid.UUID) (*models.Universe, error) {
+	return f.universe, nil
+}
+
+func TestGraphHandlerRecallRejectsForeignUniverse(t *testing.T) {
+	app := fiber.New()
+	h := NewGraphHandler(repositories.NewGraphRepo(nil), services.NewMemoryService(nil, nil, nil), repositories.NewEntityRepo(nil), nil)
+	h.SetUniverseOwnerRepo(fakeUniverseOwnerResolver{universe: &models.Universe{UserID: uuid.New()}})
+	app.Post("/api/v1/universes/:id/recall", h.Recall)
+
+	body := strings.NewReader(`{"query":"secret","k":5}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/universes/"+uuid.New().String()+"/recall", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 when no authenticated user is present", resp.StatusCode)
+	}
+
+	app = fiber.New()
+	app.Use(func(c *fiber.Ctx) error {
+		c.Locals("user_id", uuid.New())
+		return c.Next()
+	})
+	h = NewGraphHandler(repositories.NewGraphRepo(nil), services.NewMemoryService(nil, nil, nil), repositories.NewEntityRepo(nil), nil)
+	h.SetUniverseOwnerRepo(fakeUniverseOwnerResolver{universe: &models.Universe{UserID: uuid.New()}})
+	app.Post("/api/v1/universes/:id/recall", h.Recall)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/universes/"+uuid.New().String()+"/recall", strings.NewReader(`{"query":"secret","k":5}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test foreign user: %v", err)
+	}
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for a foreign universe", resp.StatusCode)
 	}
 }
 

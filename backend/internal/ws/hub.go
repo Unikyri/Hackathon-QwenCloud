@@ -33,6 +33,25 @@ type EmbeddingProvider interface {
 	GenerateEmbedding(ctx context.Context, text string) ([]float32, error)
 }
 
+// UniverseOwnerResolver is the narrow ownership seam used by recall_request.
+// The WebSocket handshake authenticates a user, but the payload can still name
+// any universe; this lookup closes that tenant boundary before MemoryService
+// sees the request.
+type UniverseOwnerResolver interface {
+	FindByID(ctx context.Context, id uuid.UUID) (*models.Universe, error)
+}
+
+// WorkOwnershipResolver and ChapterOwnershipResolver provide the additional
+// consistency checks for paragraph_submit. A valid universe alone is not
+// enough: work_id and chapter_id must point into that same universe.
+type WorkOwnershipResolver interface {
+	FindByID(ctx context.Context, id uuid.UUID) (*models.Work, error)
+}
+
+type ChapterOwnershipResolver interface {
+	FindByID(ctx context.Context, id uuid.UUID) (*models.Chapter, error)
+}
+
 // Conn wraps a WebSocket connection with per-user metadata and a write mutex.
 type Conn struct {
 	wsConn *websocket.Conn
@@ -46,12 +65,15 @@ type Conn struct {
 // ponytail: per-user single connection map, no broadcasting needed yet.
 // Broadcast(all users) is deferred until multi-user collaboration lands.
 type Hub struct {
-	conns     map[uuid.UUID]*Conn
-	mu        sync.RWMutex
-	authSvc   AuthValidator
-	submitter ParagraphSubmitter
-	recaller  RecallRequester
-	embedder  EmbeddingProvider
+	conns       map[uuid.UUID]*Conn
+	mu          sync.RWMutex
+	authSvc     AuthValidator
+	submitter   ParagraphSubmitter
+	recaller    RecallRequester
+	embedder    EmbeddingProvider
+	ownerRepo   UniverseOwnerResolver
+	workRepo    WorkOwnershipResolver
+	chapterRepo ChapterOwnershipResolver
 }
 
 // AuthValidator is the minimal auth interface used by Hub.
@@ -78,6 +100,23 @@ func (h *Hub) SetSubmitter(s ParagraphSubmitter) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.submitter = s
+}
+
+// SetUniverseOwnerResolver wires the authenticated-universe ownership check
+// after construction, keeping the existing circular-init sequence intact.
+func (h *Hub) SetUniverseOwnerResolver(repo UniverseOwnerResolver) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.ownerRepo = repo
+}
+
+// SetParagraphOwnershipResolvers wires work/chapter consistency checks for
+// paragraph submissions without expanding the Hub's constructor.
+func (h *Hub) SetParagraphOwnershipResolvers(workRepo WorkOwnershipResolver, chapterRepo ChapterOwnershipResolver) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.workRepo = workRepo
+	h.chapterRepo = chapterRepo
 }
 
 // Register adds a connection to the hub for the given user.
@@ -280,10 +319,47 @@ func (h *Hub) handleParagraphSubmit(userID uuid.UUID, msg WSMessage) {
 		return
 	}
 
+	if !h.authorizeParagraphScope(userID, payload) {
+		h.sendAnalysisFailure(userID, payload, "universe access denied")
+		return
+	}
+
 	if err := h.submitter.SubmitParagraph(context.Background(), payload.SubmissionID, payload.ParagraphRef, payload.WorkID, payload.ChapterID, payload.UniverseID, userID, payload.Text); err != nil {
 		log.Printf("[ws] submit paragraph: %v", err)
 		h.sendAnalysisFailure(userID, payload, "analysis could not be queued")
 	}
+}
+
+func (h *Hub) authorizeParagraphScope(userID uuid.UUID, payload models.ParagraphSubmitPayload) bool {
+	ctx := context.Background()
+	if h.ownerRepo != nil {
+		universe, err := h.ownerRepo.FindByID(ctx, payload.UniverseID)
+		if err != nil || universe == nil || universe.UserID != userID {
+			if err != nil {
+				log.Printf("[ws] paragraph universe ownership lookup: %v", err)
+			}
+			return false
+		}
+	}
+	if h.workRepo != nil {
+		work, err := h.workRepo.FindByID(ctx, payload.WorkID)
+		if err != nil || work == nil || work.UniverseID != payload.UniverseID {
+			if err != nil {
+				log.Printf("[ws] paragraph work ownership lookup: %v", err)
+			}
+			return false
+		}
+	}
+	if h.chapterRepo != nil {
+		chapter, err := h.chapterRepo.FindByID(ctx, payload.ChapterID)
+		if err != nil || chapter == nil || chapter.WorkID != payload.WorkID || chapter.UniverseID != payload.UniverseID {
+			if err != nil {
+				log.Printf("[ws] paragraph chapter ownership lookup: %v", err)
+			}
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Hub) sendAnalysisFailure(userID uuid.UUID, submitted models.ParagraphSubmitPayload, reason string) {
@@ -321,6 +397,18 @@ func (h *Hub) handleRecallRequest(userID uuid.UUID, msg WSMessage) {
 	}
 	if payload.K > 20 {
 		payload.K = 20
+	}
+
+	if h.ownerRepo != nil {
+		universe, err := h.ownerRepo.FindByID(context.Background(), payload.UniverseID)
+		if err != nil || universe == nil || universe.UserID != userID {
+			if err != nil {
+				log.Printf("[ws] recall universe ownership lookup: %v", err)
+			}
+			errMsg, _ := NewMessage(TypeError, map[string]string{"error": "universe access denied"})
+			_ = h.SendToUser(userID, errMsg)
+			return
+		}
 	}
 
 	if h.recaller == nil {

@@ -17,12 +17,12 @@ starts believing its own measurements are the writer's wishes.
 
 ---
 
-## Task 4.1 — Migration `023`: the three tables
+## Task 4.1 — Migration `024`: the three tables plus decay history
 
-**Files:** `backend/migrations/022_writer_memory.up.sql` / `.down.sql`
+**Files:** `backend/migrations/024_writer_memory.up.sql` / `.down.sql`
 
-> Numbering note: `022` is consumed by Sprint 2's entity natural-key index, so Writer
-> Memory lands as `023` and the skills association (Sprint 5) as `024`. The SRS wrote
+> Numbering note: `023` is consumed by the entity mention character-offset migration,
+> so Writer Memory lands as `024` and the skills association (Sprint 5) follows it. The SRS wrote
 > these as 021/022 before sprint order was fixed — the schemas in SRS §6.1 are the
 > contract; only the numbers shift.
 
@@ -40,6 +40,10 @@ Schemas exactly as SRS §6.1:
    and feedback events that justified promotion.
 3. **`writer_feedback_events`** — the intent signals: accepted/rejected/edited craft
    notes, explicit statements, with refs to the note and skill that produced them.
+
+The same migration also creates `writer_preference_history`, the WM-9 time-series
+snapshot table mirroring `entity_relevance_history`; it is required for the Memory
+Theater decay explanation and is dropped before the three source tables on rollback.
 
 Both `.down.sql` restore cleanly (NF-3).
 
@@ -167,10 +171,10 @@ list and a comprehensible, non-empty preferences panel.
 
 ## Definition of done
 
-- [ ] Migration `023` up/down clean; three tables per SRS §6.1 schemas.
-- [ ] Stylometry writes observations only, zero LLM (structurally: no client dependency), covered by deterministic tests.
-- [ ] Promotion requires an intent signal; scope classification is writer-correctable.
-- [ ] **The defining test passes: a note rejected three times stops being emitted (WM-5).**
-- [ ] Sixth recall pipeline conditioned by genre tags, nil-safe, visible in `RecallExplain`.
-- [ ] Evidence-trail endpoint + panel: every belief traceable to facts and writer actions.
-- [ ] `make e2e` still green.
+- [x] Migration `024` up/down clean; three source tables plus the decay-history table per SRS §6.1.
+- [x] Stylometry writes observations only, zero LLM (structurally: no client dependency), covered by deterministic tests.
+- [x] Promotion requires an intent signal; scope classification is writer-correctable.
+- [x] **The defining test passes: a note rejected three times stops being emitted (WM-5).**
+- [x] Sixth recall pipeline conditioned by genre tags, nil-safe, visible in `RecallExplain`.
+- [x] Evidence-trail endpoint + panel: every belief traceable to facts and writer actions.
+- [x] `make e2e` still green.

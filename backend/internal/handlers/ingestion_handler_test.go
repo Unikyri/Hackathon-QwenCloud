@@ -24,6 +24,14 @@ type mockIngestionSvc struct {
 	jobs      []models.IngestionJob
 }
 
+type ingestionOwnerResolver struct {
+	universe *models.Universe
+}
+
+func (r ingestionOwnerResolver) FindByID(_ context.Context, _ uuid.UUID) (*models.Universe, error) {
+	return r.universe, nil
+}
+
 func (m *mockIngestionSvc) Start(ctx context.Context, universeID uuid.UUID, reader io.Reader, filename string) (uuid.UUID, bool, error) {
 	return m.jobID, m.duplicate, m.err
 }
@@ -192,5 +200,38 @@ func TestIngestionHandlerNoFile(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request for no file, got %d", resp.StatusCode)
+	}
+}
+
+func TestIngestionHandlerRejectsForeignUniverse(t *testing.T) {
+	app := fiber.New()
+	callerID := uuid.New()
+	h := &IngestionHandler{
+		ingestionSvc: &mockIngestionSvc{},
+		ownerRepo:    ingestionOwnerResolver{universe: &models.Universe{UserID: uuid.New()}},
+	}
+	app.Use(func(c *fiber.Ctx) error {
+		c.Locals("user_id", callerID)
+		return c.Next()
+	})
+	app.Post("/api/v1/universes/:id/ingest", h.Ingest)
+	app.Get("/api/v1/universes/:id/ingestions", h.Jobs)
+
+	universeID := uuid.New()
+	for _, path := range []string{
+		"/api/v1/universes/" + universeID.String() + "/ingest",
+		"/api/v1/universes/" + universeID.String() + "/ingestions",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if path[len(path)-1] != 's' {
+			req = httptest.NewRequest(http.MethodPost, path, nil)
+		}
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("app.Test %s: %v", path, err)
+		}
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("%s status = %d, want 403", path, resp.StatusCode)
+		}
 	}
 }

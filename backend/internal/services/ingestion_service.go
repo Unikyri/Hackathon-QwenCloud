@@ -80,6 +80,13 @@ type IngestionService struct {
 	analysisMaxChapters int
 	progressNow         func() time.Time
 	newProgressTicker   func(time.Duration) ingestionTicker
+	stylometrySvc       WriterCorpusObservationSink
+}
+
+// SetStylometry wires the corpus-wide cold-start pass. It is optional so
+// existing ingestion tests and deployments can remain unchanged.
+func (s *IngestionService) SetStylometry(stylometry WriterCorpusObservationSink) {
+	s.stylometrySvc = stylometry
 }
 
 // NewIngestionService creates an IngestionService. All parameters may be nil
@@ -489,6 +496,7 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 	anySucceeded := false
 	var lastErr error
 	var ingestedChapters []ingestedChapter
+	var ingestedCorpus []string
 	var relationshipCorpus strings.Builder
 	var relationshipEntities []ResolvedEntity
 	var relationshipChunks [][]ResolvedEntity
@@ -523,6 +531,7 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 				continue
 			}
 			chapterID = chapter.ID
+			ingestedCorpus = append(ingestedCorpus, ch.content)
 		}
 
 		// MAP has already produced embeddings; REDUCE only attaches the now-known
@@ -572,6 +581,11 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 	// completed job to failed. No-ops when SetPostIngestAnalysis wasn't
 	// called (nil deps).
 	s.runPostIngestAnalysis(ctx, universeID, ingestedChapters, ownerID)
+	if s.stylometrySvc != nil && ownerID != uuid.Nil && len(ingestedCorpus) > 0 {
+		if _, err := s.stylometrySvc.ObserveCorpus(ctx, ownerID, universeID, ingestedCorpus); err != nil {
+			log.Printf("[ingestion] writer stylometry corpus: %v", err)
+		}
+	}
 
 	s.updateJobStatus(ctx, jobID, "completed", "")
 	progress.finish("completed", len(chunks), entitiesTotal, "Ingestion complete.")

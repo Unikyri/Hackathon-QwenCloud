@@ -242,6 +242,66 @@ func TestHubRecallEmbeddingProviderError(t *testing.T) {
 	}
 }
 
+func TestHubRecallRejectsForeignUniverse(t *testing.T) {
+	mockRecaller := &mockRecallRequester{}
+	hub := NewHub(nil, nil, mockRecaller, nil)
+	hub.SetUniverseOwnerResolver(mockUniverseOwnerResolver{universe: &models.Universe{UserID: uuid.New()}})
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"universe_id": uuid.New(),
+		"query":       "private context",
+		"k":           5,
+	})
+	hub.handleRecallRequest(uuid.New(), WSMessage{Type: TypeRecallRequest, Payload: payload})
+
+	if mockRecaller.called {
+		t.Fatal("recall must not reach MemoryService for a foreign universe")
+	}
+}
+
+func TestHubParagraphRejectsForeignUniverse(t *testing.T) {
+	mockSubmitter := &mockParagraphSubmitter{}
+	hub := NewHub(nil, mockSubmitter, nil, nil)
+	hub.SetUniverseOwnerResolver(mockUniverseOwnerResolver{universe: &models.Universe{UserID: uuid.New()}})
+
+	payload, _ := json.Marshal(models.ParagraphSubmitPayload{
+		SubmissionID: "submission-foreign",
+		ParagraphRef: "chapter:1",
+		WorkID:       uuid.New(),
+		ChapterID:    uuid.New(),
+		UniverseID:   uuid.New(),
+		Text:         "Private paragraph",
+	})
+	hub.handleParagraphSubmit(uuid.New(), WSMessage{Type: TypeParagraphSubmit, Payload: payload})
+
+	if mockSubmitter.called {
+		t.Fatal("paragraph must not reach AnalysisService for a foreign universe")
+	}
+}
+
+func TestHubParagraphRejectsMismatchedWork(t *testing.T) {
+	ownerID := uuid.New()
+	universeID := uuid.New()
+	mockSubmitter := &mockParagraphSubmitter{}
+	hub := NewHub(nil, mockSubmitter, nil, nil)
+	hub.SetUniverseOwnerResolver(mockUniverseOwnerResolver{universe: &models.Universe{UserID: ownerID}})
+	hub.SetParagraphOwnershipResolvers(mockWorkOwnershipResolver{work: &models.Work{UniverseID: uuid.New()}}, nil)
+
+	payload, _ := json.Marshal(models.ParagraphSubmitPayload{
+		SubmissionID: "submission-mismatched-work",
+		ParagraphRef: "chapter:1",
+		WorkID:       uuid.New(),
+		ChapterID:    uuid.New(),
+		UniverseID:   universeID,
+		Text:         "Mismatched work",
+	})
+	hub.handleParagraphSubmit(ownerID, WSMessage{Type: TypeParagraphSubmit, Payload: payload})
+
+	if mockSubmitter.called {
+		t.Fatal("paragraph must not reach AnalysisService when work belongs to another universe")
+	}
+}
+
 // TestWSMessageTypeConstantsMatch verifies the ws constants are aligned.
 func TestWSMessageTypeConstantsMatch(t *testing.T) {
 	// Verify we can construct the well-known messages
@@ -292,6 +352,22 @@ type mockRecallRequesterWithEmbedding struct {
 	universeID uuid.UUID
 	embedding  []float32
 	k          int
+}
+
+type mockUniverseOwnerResolver struct {
+	universe *models.Universe
+}
+
+func (m mockUniverseOwnerResolver) FindByID(_ context.Context, _ uuid.UUID) (*models.Universe, error) {
+	return m.universe, nil
+}
+
+type mockWorkOwnershipResolver struct {
+	work *models.Work
+}
+
+func (m mockWorkOwnershipResolver) FindByID(_ context.Context, _ uuid.UUID) (*models.Work, error) {
+	return m.work, nil
 }
 
 func (m *mockRecallRequesterWithEmbedding) RecallWithQuery(ctx context.Context, universeID uuid.UUID, queryEmbedding []float32, queryText string, k int) ([]models.RecallItem, error) {

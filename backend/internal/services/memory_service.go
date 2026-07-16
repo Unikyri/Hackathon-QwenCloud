@@ -99,15 +99,14 @@ type ResolvedEntity struct {
 // recency-ranked) entity IDs seed the graph pipeline's neighbor lookup.
 const graphSeedCap = 5
 
-// pipelineSet holds the five independently-ranked pipeline outputs produced
+// pipelineSet holds the independently-ranked pipeline outputs produced
 // by runPipelines, before RRF fusion.
 type pipelineSet struct {
-	Vector, Graph, Recency, Keyword, Consolidated []rankedEntry
+	Vector, Graph, Recency, Keyword, Consolidated, Preference []rankedEntry
 }
 
-// MemoryService provides contextual recall by fusing up to four
-// independently-ranked pipelines (vector similarity, graph context,
-// recency/keyword, consolidated memories) via Reciprocal Rank Fusion.
+// MemoryService provides contextual recall by fusing story pipelines and an
+// optional writer-preference pipeline via Reciprocal Rank Fusion.
 //
 // consolidationRepo and budgetMgr are optional (nil-safe): consolidationRepo
 // nil skips the consolidated-memory pipeline, budgetMgr nil skips budget
@@ -119,6 +118,7 @@ type MemoryService struct {
 	entityRepo        *repositories.EntityRepo
 	vectorRepo        *repositories.VectorRepo
 	consolidationRepo *repositories.ConsolidationRepo
+	writerMemoryRepo  *repositories.WriterMemoryRepo
 	budgetMgr         *ContextBudgetManager
 	reranker          Reranker
 
@@ -142,6 +142,12 @@ func NewMemoryService(graphRepo *repositories.GraphRepo, entityRepo *repositorie
 // nil-safe; the pipeline is skipped when unset.
 func (s *MemoryService) SetConsolidationRepo(r *repositories.ConsolidationRepo) {
 	s.consolidationRepo = r
+}
+
+// SetWriterMemoryRepo wires the optional sixth recall pipeline. A nil repo
+// preserves the legacy five-pipeline behavior exactly.
+func (s *MemoryService) SetWriterMemoryRepo(r *repositories.WriterMemoryRepo) {
+	s.writerMemoryRepo = r
 }
 
 // SetBudgetMgr wires context-budget fitting via FitToBudget/VectorTokens.
@@ -182,7 +188,7 @@ func (s *MemoryService) RecallWithQuery(ctx context.Context, universeID uuid.UUI
 		return nil, err
 	}
 
-	fused := fuseRRF(ps.Vector, ps.Graph, ps.Recency, ps.Keyword, ps.Consolidated)
+	fused := fuseRRF(ps.Vector, ps.Graph, ps.Recency, ps.Keyword, ps.Consolidated, ps.Preference)
 	var rerankScores map[string]float64
 	fused, rerankScores = s.rerankFused(ctx, queryText, fused, k)
 
@@ -218,13 +224,14 @@ func (s *MemoryService) RecallWithPipelines(ctx context.Context, universeID uuid
 		"recency":      ps.Recency,
 		"keyword":      ps.Keyword,
 		"consolidated": ps.Consolidated,
+		"preference":   ps.Preference,
 	}
 
 	var selected [][]rankedEntry
 	if len(pipelines) == 0 {
-		selected = [][]rankedEntry{ps.Vector, ps.Graph, ps.Recency, ps.Keyword, ps.Consolidated}
+		selected = [][]rankedEntry{ps.Vector, ps.Graph, ps.Recency, ps.Keyword, ps.Consolidated, ps.Preference}
 	} else {
-		order := []string{"vector", "graph", "recency", "keyword", "consolidated"}
+		order := []string{"vector", "graph", "recency", "keyword", "consolidated", "preference"}
 		for _, name := range order {
 			for _, p := range pipelines {
 				if p == name {
@@ -319,6 +326,7 @@ func (s *MemoryService) runPipelines(ctx context.Context, universeID uuid.UUID, 
 		recencyRanked      []rankedEntry
 		keywordRanked      []rankedEntry
 		consolidatedRanked []rankedEntry
+		preferenceRanked   []rankedEntry
 		graphSeeds         []uuid.UUID
 	)
 
@@ -384,6 +392,25 @@ func (s *MemoryService) runPipelines(ctx context.Context, universeID uuid.UUID, 
 		}()
 	}
 
+	if s.writerMemoryRepo != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			preferences, err := s.writerMemoryRepo.ListActiveForUniverse(ctx, universeID, k)
+			if err != nil {
+				log.Printf("[memory] preference pipeline skipped: %v", err)
+				return
+			}
+			for _, preference := range preferences {
+				preferenceRanked = append(preferenceRanked, rankedEntry{
+					id:     "preference:" + preference.ID.String(),
+					fact:   preference.Statement,
+					source: "preference",
+				})
+			}
+		}()
+	}
+
 	wg.Wait()
 
 	return pipelineSet{
@@ -392,6 +419,7 @@ func (s *MemoryService) runPipelines(ctx context.Context, universeID uuid.UUID, 
 		Recency:      recencyRanked,
 		Keyword:      keywordRanked,
 		Consolidated: consolidatedRanked,
+		Preference:   preferenceRanked,
 	}, nil
 }
 
@@ -423,9 +451,9 @@ type RecallExplanation struct {
 }
 
 // RecallExplain is the explain-mode counterpart to RecallWithQuery: it fuses
-// the same five pipelines via fuseRRFExplain (recording a full contribution
+// the same six pipelines via fuseRRFExplain (recording a full contribution
 // ledger per item instead of collapsing straight to models.RecallItem),
-// always reports all 5 PipelineSizes keys (0 for skipped/empty pipelines),
+// always reports all 6 PipelineSizes keys (0 for skipped/empty pipelines),
 // and marks FitInBudget per item against the real budget report. When
 // budgetMgr is nil, every item reports FitInBudget=true and Budget is the
 // zero value — it never panics (mirrors RecallWithQuery's nil-guard).
@@ -441,6 +469,7 @@ func (s *MemoryService) RecallExplain(ctx context.Context, universeID uuid.UUID,
 		{Name: "recency", Entries: ps.Recency},
 		{Name: "keyword", Entries: ps.Keyword},
 		{Name: "consolidated", Entries: ps.Consolidated},
+		{Name: "preference", Entries: ps.Preference},
 	}
 
 	items := fuseRRFExplain(pairs)

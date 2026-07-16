@@ -13,8 +13,8 @@ and open up (6).
 | [Sprint 1](./SPRINT-1-live-analysis-e2e.md) | P1 | Live-analysis diagnosis & fix, lifecycle visibility, E2E suite (`make e2e`) | §3 (LA, EE) | — |
 | [Sprint 2](./SPRINT-2-ingestion-performance.md) | P1 | MAP/REDUCE ingestion, TPM throttle, model tiering, honest ETA | §4 (IG, TH, MT, PF) | `022` |
 | [Sprint 3](./SPRINT-3-dashscope-native.md) | P2 | Native DashScope client, context cache, structured output, rerank | §5 (DS, CC, SO, RR) | — |
-| [Sprint 4](./SPRINT-4-writer-memory.md) | P2 | Writer Memory: stylometry, promotion loop, recall conditioning, evidence trail | §6 (WM, RC, EX, CS) | `023` |
-| [Sprint 5](./SPRINT-5-skills.md) | P2 | Skill loading/selection machinery, craft review (content already authored) | §7 (SF, SS, CV) | `024` |
+| [Sprint 4](./SPRINT-4-writer-memory.md) | P2 | Writer Memory: stylometry, promotion loop, recall conditioning, evidence trail | §6 (WM, RC, EX, CS) | `024` |
+| [Sprint 5](./SPRINT-5-skills.md) | P2 | Skill loading/selection machinery, craft review (content already authored) | §7 (SF, SS, CV) | `025` |
 | [Sprint 6](./SPRINT-6-editor-mcp.md) | P3 | Autosave durability, import/export, highlighting, candidates tray, MCP | §8–§9 (EH, EC, ID, MC) | — |
 
 ## Model & quota strategy

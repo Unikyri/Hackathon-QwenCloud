@@ -573,6 +573,32 @@ func (s *QwenService) Chat(ctx context.Context, model string, messages []QwenMes
 	return qwenResp.Choices[0].Message.Content, nil
 }
 
+// ChatStructured is the OpenAI-compatible structured-output counterpart to
+// Chat. It is intentionally separate so existing callers keep the exact
+// legacy request shape when no schema is needed.
+func (s *QwenService) ChatStructured(ctx context.Context, model string, messages []QwenMessage, format *ResponseFormat) (string, error) {
+	if model == "" {
+		model = s.maxModel
+	}
+	payload := QwenRequest{Model: model, Messages: messages, ResponseFormat: format}
+	sem := s.turboSem
+	if s.tierForModel(model) == qwenMaxTier {
+		sem = s.maxSem
+	}
+	respBody, err := s.callWithSemaphore(ctx, sem, model, payload)
+	if err != nil {
+		return "", err
+	}
+	var qwenResp QwenResponse
+	if err := json.Unmarshal(respBody, &qwenResp); err != nil {
+		return "", fmt.Errorf("unmarshal structured chat response: %w", err)
+	}
+	if len(qwenResp.Choices) == 0 {
+		return "", fmt.Errorf("no choices in structured chat response")
+	}
+	return qwenResp.Choices[0].Message.Content, nil
+}
+
 func (s *QwenService) ExtractEntities(ctx context.Context, text string, universeContext string) (*ExtractedEntities, error) {
 	prompt := fmt.Sprintf(`You are a narrative analysis AI. Extract ALL named entities from this paragraph.
 

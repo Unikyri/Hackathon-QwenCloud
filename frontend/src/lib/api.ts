@@ -1,4 +1,4 @@
-import type { IngestionJobDTO, MemoryStatusEntity, RecallExplanation } from './types'
+import type { IngestionJobDTO, MemoryStatusEntity, RecallExplanation, WriterObservationDTO, WriterPreferenceDTO, WriterPreferenceEvidenceDTO } from './types'
 
 const API_BASE = '/api/v1'
 
@@ -190,4 +190,16 @@ export const api = {
 
   listIngestionJobs: (universeId: string) =>
     request<{ jobs: IngestionJobDTO[] }>(`/universes/${universeId}/ingestions`),
+
+  // Writer Memory — all endpoints are authenticated and user-scoped.
+  getWriterPreferences: () =>
+    request<{ preferences: WriterPreferenceDTO[]; observations: WriterObservationDTO[] }>('/users/me/preferences'),
+  getWriterPreferenceEvidence: (preferenceId: string) =>
+    request<WriterPreferenceEvidenceDTO>(`/users/me/preferences/${preferenceId}/evidence`),
+  correctWriterPreference: (preferenceId: string, data: { scope: 'universal' | 'genre_bound'; genre_tags: string[] }) =>
+    request<{ preference: WriterPreferenceDTO }>(`/users/me/preferences/${preferenceId}`, { method: 'PATCH', json: data }),
+  deactivateWriterPreference: (preferenceId: string) =>
+    request<void>(`/users/me/preferences/${preferenceId}`, { method: 'DELETE' }),
+  submitWriterFeedback: (data: Record<string, unknown>) =>
+    request<{ preference?: WriterPreferenceDTO }>(`/users/me/preferences/feedback`, { method: 'POST', json: data }),
 }

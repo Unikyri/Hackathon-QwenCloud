@@ -240,9 +240,10 @@ The chain exists and is wired. It does not work. **Diagnosis precedes any rewrit
 
 ## 6. P2 — Writer Memory
 
-### 6.1 Data model — migration `023`
+### 6.1 Data model — migration `024`
 
-Two tables. The split is load-bearing (PRD §5.1).
+Three source tables plus a decay-history table. The split between measurable
+observations and inferred intent is load-bearing (PRD §5.1).
 
 **`writer_observations`** — verifiable facts about how the writer writes.
 
@@ -345,7 +346,7 @@ Two tables. The split is load-bearing (PRD §5.1).
 
 | ID | Priority | Requirement |
 |---|---|---|
-| **SS-1** | P2 | Skills are activated at the **universe** level. Migration `024` adds the universe↔skill association. |
+| **SS-1** | P2 | Skills are activated at the **universe** level. Migration `025` adds the universe↔skill association. |
 | **SS-2** | P2 | On universe creation, the system **SHOULD** pre-suggest skills whose `genre_tags` intersect the universe's genre tags. |
 | **SS-3** | P2 | When a craft review is requested, the **agent MUST select** which of the active skills apply to the passage, by reasoning over the `description` fields alone. |
 | **SS-4** | P2 | Selection **MUST** use **progressive disclosure**: only the `description` lines enter the selection prompt; only the selected skill's **full body** is then loaded into the review prompt. This is the token optimisation; loading every active skill body would defeat it. |

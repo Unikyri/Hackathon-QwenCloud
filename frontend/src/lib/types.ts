@@ -77,3 +77,57 @@ export interface RecallExplanation {
   items: ExplainedItem[]
   budget: RecallBudget
 }
+
+export interface WriterObservationDTO {
+  id: string
+  user_id: string
+  universe_id?: string
+  metric: string
+  value: number
+  sample_size: number
+  computed_at: string
+}
+
+export interface WriterPreferenceDTO {
+  id: string
+  user_id: string
+  statement: string
+  scope: 'universal' | 'genre_bound'
+  genre_tags: string[]
+  confidence: number
+  relevance_score: number
+  lifecycle: 'active' | 'archived'
+  last_reinforced_at: string
+  observation_ids: string[]
+  feedback_event_ids: string[]
+  created_at: string
+}
+
+export interface WriterFeedbackEventDTO {
+  id: string
+  user_id: string
+  universe_id?: string
+  chapter_id?: string
+  note_id?: string
+  signal: 'accept' | 'reject' | 'behavioural_accept'
+  preference_id?: string
+  payload: Record<string, unknown>
+  created_at: string
+}
+
+export interface WriterPreferenceHistoryDTO {
+  id: string
+  user_id: string
+  preference_id?: string
+  relevance_score: number
+  confidence: number
+  lifecycle: 'active' | 'archived'
+  recorded_at: string
+}
+
+export interface WriterPreferenceEvidenceDTO {
+  preference: WriterPreferenceDTO
+  observations: WriterObservationDTO[]
+  feedback_events: WriterFeedbackEventDTO[]
+  history: WriterPreferenceHistoryDTO[]
+}

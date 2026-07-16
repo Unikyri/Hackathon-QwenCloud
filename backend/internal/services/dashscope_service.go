@@ -703,6 +703,27 @@ func (s *DashScopeService) Chat(ctx context.Context, model string, messages []Qw
 	return response.Choices[0].Message.Content, nil
 }
 
+// ChatStructured sends a native DashScope schema-constrained request. The
+// provider-native path carries the descriptor under parameters.response_format
+// while callers remain protocol-neutral.
+func (s *DashScopeService) ChatStructured(ctx context.Context, model string, messages []QwenMessage, format *ResponseFormat) (string, error) {
+	if model == "" {
+		model = s.maxModel
+	}
+	response, err := s.nativeChat(ctx, dashScopeChatRequest{
+		Model:      model,
+		Input:      dashScopeInput{Messages: messages},
+		Parameters: dashScopeParameters{ResultFormat: "message", ResponseFormat: format},
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(response.Choices) == 0 {
+		return "", fmt.Errorf("no choices in structured DashScope response")
+	}
+	return response.Choices[0].Message.Content, nil
+}
+
 // dashScopeExtractionSystemPrompt is the stable prefix for entity extraction:
 // schema instructions and universe lore stay byte-identical across paragraphs,
 // while the user message carries only the variable paragraph. DashScope's
