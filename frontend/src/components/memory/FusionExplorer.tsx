@@ -8,9 +8,9 @@ interface FusionExplorerProps {
   onResult?: (result: RecallExplanation) => void
 }
 
-// Same 5 RRF pipelines + colors as ContextPanel's SOURCE_META, re-declared
+// Same RRF pipelines + colors as ContextPanel's SOURCE_META, re-declared
 // here rather than imported (ContextPanel.tsx stays unmodified per spec).
-const PIPELINES = ['vector', 'graph', 'recency', 'keyword', 'consolidated'] as const
+const PIPELINES = ['vector', 'graph', 'recency', 'keyword', 'consolidated', 'preference'] as const
 
 const PIPELINE_META: Record<string, { color: string }> = {
   vector: { color: 'var(--teal)' },
@@ -18,6 +18,7 @@ const PIPELINE_META: Record<string, { color: string }> = {
   recency: { color: 'var(--gold-ink)' },
   keyword: { color: 'var(--muted)' },
   consolidated: { color: 'var(--node-event)' },
+  preference: { color: 'var(--gold)' },
 }
 
 export default function FusionExplorer({ universeId, onResult }: FusionExplorerProps) {

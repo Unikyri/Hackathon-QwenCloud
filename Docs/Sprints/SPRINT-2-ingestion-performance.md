@@ -138,7 +138,8 @@ real chapters, and the ETA appears late and behaves monotonically enough to trus
    re-fetch and use the winner. With serial REDUCE this should never fire — it exists so
    a **future** concurrency bug fails loudly instead of duplicating silently.
 
-> Note: this renumbers nothing — Writer Memory's migration (SRS §6.1) becomes `022+`;
+> Note: this renumbers nothing — Writer Memory's migration (SRS §6.1) follows the
+> character-offset migration as `024`;
 > migration numbers are allocated in sprint order from here on.
 
 **Expected result:** the index exists; a test inserting the same (universe, name, type)

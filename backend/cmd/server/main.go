@@ -82,6 +82,7 @@ func main() {
 	timelineRepo := repositories.NewTimelineRepo(pool)
 	plotHoleRepo := repositories.NewPlotHoleRepo(pool)
 	consolidationRepo := repositories.NewConsolidationRepo(pool)
+	writerMemoryRepo := repositories.NewWriterMemoryRepo(pool)
 
 	// ── Services ──
 
@@ -106,8 +107,13 @@ func main() {
 	consolidationSvc := services.NewConsolidationService(consolidationRepo, entityRepo, llmSvc)
 	relevSvc := services.NewRelevanceService(pool, entityRepo, cfg.DecayLambda, cfg.ArchiveThreshold, consolidationSvc)
 	chapterSvc := services.NewChapterService(pool, chapterRepo, workRepo, relevSvc)
+	writerMemorySvc := services.NewWriterMemoryService(writerMemoryRepo, llmSvc, cfg.WriterPreferencePromotionThreshold, cfg.DecayLambda, cfg.ArchiveThreshold)
+	stylometrySvc := services.NewStylometryService(writerMemoryRepo)
+	chapterSvc.SetWriterMemory(universeRepo, stylometrySvc)
+	chapterSvc.SetWriterMemoryDecayer(writerMemorySvc)
 	memorySvc := services.NewMemoryService(graphRepo, entityRepo, vectorRepo)
 	memorySvc.SetConsolidationRepo(consolidationRepo)
+	memorySvc.SetWriterMemoryRepo(writerMemoryRepo)
 	memorySvc.SetBudgetMgr(budgetMgr)
 	if reranker, ok := llmSvc.(services.Reranker); ok {
 		memorySvc.SetReranker(reranker)
@@ -132,6 +138,8 @@ func main() {
 
 	// WebSocket Hub (created first with nil submitter/recaller — set later to avoid circular init)
 	hub := ws.NewHub(authSvc, nil, memorySvc, llmSvc)
+	hub.SetUniverseOwnerResolver(universeRepo)
+	hub.SetParagraphOwnershipResolvers(workRepo, chapterRepo)
 
 	// AnalysisService (depends on all other services and the hub)
 	analysisSvc := services.NewAnalysisService(pool, entitySvc, contraSvc, relevSvc, timelineSvc, plotHoleSvc, llmSvc, hub, memorySvc)
@@ -142,6 +150,7 @@ func main() {
 	// Ingestion service (async document upload pipeline)
 	ingestionSvc := services.NewIngestionService(pool, entitySvc, vectorRepo, graphRepo, llmSvc, hub)
 	ingestionSvc.SetPostIngestAnalysis(contraSvc, plotHoleSvc, budgetMgr, cfg.IngestAnalysisMaxChapters)
+	ingestionSvc.SetStylometry(stylometrySvc)
 
 	// ── Handlers ──
 
@@ -149,6 +158,7 @@ func main() {
 	universeH := handlers.NewUniverseHandler(universeSvc)
 	workH := handlers.NewWorkHandler(workSvc)
 	chapterH := handlers.NewChapterHandler(chapterSvc)
+	chapterH.SetOwnershipRepos(universeRepo, workRepo, chapterRepo)
 	entityH := handlers.NewEntityHandler(entitySvc)
 	healthH := handlers.NewHealthHandler(pool, llmSvc, cfg)
 	demoH := handlers.NewDemoHandler(demoSvc)
@@ -159,7 +169,12 @@ func main() {
 	plotHoleH := handlers.NewPlotHoleHandler(plotHoleSvc).WithRepo(plotHoleRepo)
 	graphH := handlers.NewGraphHandler(graphRepo, memorySvc, entityRepo, llmSvc)
 	graphH.SetDecayer(relevSvc)
+	graphH.SetWriterMemoryDecayer(writerMemorySvc)
+	graphH.SetUniverseOwnerRepo(universeRepo)
 	ingestionH := handlers.NewIngestionHandler(ingestionSvc)
+	ingestionH.SetUniverseOwnerRepo(universeRepo)
+	writerMemoryH := handlers.NewWriterMemoryHandler(writerMemorySvc)
+	writerMemoryH.SetOwnershipRepos(universeRepo, chapterRepo)
 
 	// ── Fiber App ──
 
@@ -232,6 +247,15 @@ func main() {
 	api.Post("/universes/:id/decay", graphH.RunDecay)
 	api.Post("/universes/:id/ingest", ingestionH.Ingest)
 	api.Get("/universes/:id/ingestions", ingestionH.Jobs)
+
+	// Writer Memory (authenticated, user-scoped evidence and correction)
+	api.Get("/users/me/preferences", writerMemoryH.ListPreferences)
+	api.Get("/users/me/preferences/:id/evidence", writerMemoryH.Evidence)
+	api.Patch("/users/me/preferences/:id", writerMemoryH.Correct)
+	api.Put("/users/me/preferences/:id/correct", writerMemoryH.Correct)
+	api.Delete("/users/me/preferences/:id", writerMemoryH.Deactivate)
+	api.Post("/users/me/preferences/:id/deactivate", writerMemoryH.Deactivate)
+	api.Post("/users/me/preferences/feedback", writerMemoryH.Feedback)
 
 	// Demo (public)
 	app.Post("/api/v1/demo/clone", demoH.Clone)

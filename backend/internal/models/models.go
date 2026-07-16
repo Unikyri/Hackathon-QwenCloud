@@ -221,6 +221,71 @@ type ConsolidatedMemory struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// WriterObservation is a verifiable, zero-LLM stylometry fact. It is
+// intentionally separate from WriterPreference: observations never imply
+// intent on their own.
+type WriterObservation struct {
+	ID         uuid.UUID  `json:"id"`
+	UserID     uuid.UUID  `json:"user_id"`
+	UniverseID *uuid.UUID `json:"universe_id,omitempty"`
+	Metric     string     `json:"metric"`
+	Value      float64    `json:"value"`
+	SampleSize int        `json:"sample_size"`
+	ComputedAt time.Time  `json:"computed_at"`
+}
+
+// WriterPreference is an inferred belief about writer intent. Relevance and
+// lifecycle follow the same decay model as story entities.
+type WriterPreference struct {
+	ID               uuid.UUID   `json:"id"`
+	UserID           uuid.UUID   `json:"user_id"`
+	Statement        string      `json:"statement"`
+	Scope            string      `json:"scope"`
+	GenreTags        []string    `json:"genre_tags"`
+	Confidence       float64     `json:"confidence"`
+	RelevanceScore   float64     `json:"relevance_score"`
+	Lifecycle        string      `json:"lifecycle"`
+	Embedding        []float32   `json:"-"`
+	LastReinforcedAt time.Time   `json:"last_reinforced_at"`
+	ObservationIDs   []uuid.UUID `json:"observation_ids"`
+	FeedbackEventIDs []uuid.UUID `json:"feedback_event_ids"`
+	CreatedAt        time.Time   `json:"created_at"`
+}
+
+// WriterFeedbackEvent is the raw, user-originated intent evidence. Silent
+// dismissal is deliberately not representable in Signal.
+type WriterFeedbackEvent struct {
+	ID           uuid.UUID       `json:"id"`
+	UserID       uuid.UUID       `json:"user_id"`
+	UniverseID   *uuid.UUID      `json:"universe_id,omitempty"`
+	ChapterID    *uuid.UUID      `json:"chapter_id,omitempty"`
+	NoteID       *uuid.UUID      `json:"note_id,omitempty"`
+	Signal       string          `json:"signal"`
+	PreferenceID *uuid.UUID      `json:"preference_id,omitempty"`
+	Payload      json.RawMessage `json:"payload"`
+	CreatedAt    time.Time       `json:"created_at"`
+}
+
+// WriterPreferenceHistory is a point-in-time decay/reinforcement snapshot.
+type WriterPreferenceHistory struct {
+	ID             uuid.UUID  `json:"id"`
+	UserID         uuid.UUID  `json:"user_id"`
+	PreferenceID   *uuid.UUID `json:"preference_id,omitempty"`
+	RelevanceScore float64    `json:"relevance_score"`
+	Confidence     float64    `json:"confidence"`
+	Lifecycle      string     `json:"lifecycle"`
+	RecordedAt     time.Time  `json:"recorded_at"`
+}
+
+// WriterPreferenceEvidence is the explainability payload returned by the
+// preference evidence endpoint.
+type WriterPreferenceEvidence struct {
+	Preference   WriterPreference          `json:"preference"`
+	Observations []WriterObservation       `json:"observations"`
+	Events       []WriterFeedbackEvent     `json:"feedback_events"`
+	History      []WriterPreferenceHistory `json:"history"`
+}
+
 type HealthResponse struct {
 	Status        string `json:"status"`
 	DB            string `json:"db"`

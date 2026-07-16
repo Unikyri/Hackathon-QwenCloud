@@ -13,10 +13,32 @@ import (
 )
 
 type ChapterService struct {
-	pool        *pgxpool.Pool
-	chapterRepo *repositories.ChapterRepo
-	workRepo    *repositories.WorkRepo
-	relevSvc    *RelevanceService
+	pool         *pgxpool.Pool
+	chapterRepo  *repositories.ChapterRepo
+	workRepo     *repositories.WorkRepo
+	relevSvc     *RelevanceService
+	universeRepo *repositories.UniverseRepo
+	stylometry   WriterObservationSink
+	writerDecay  WriterMemoryDecayer
+}
+
+// WriterMemoryDecayer is the narrow chapter-advance hook for writer
+// preferences. It is intentionally separate from the autosave/update path:
+// only creating the next chapter advances the writer-memory clock.
+type WriterMemoryDecayer interface {
+	DecayForUniverse(context.Context, uuid.UUID) error
+}
+
+// SetWriterMemory wires the optional asynchronous chapter-save enrichment.
+// Keeping it setter-based preserves existing constructor call sites and makes
+// the hook nil-safe in unit tests.
+func (s *ChapterService) SetWriterMemory(universeRepo *repositories.UniverseRepo, stylometry WriterObservationSink) {
+	s.universeRepo = universeRepo
+	s.stylometry = stylometry
+}
+
+func (s *ChapterService) SetWriterMemoryDecayer(decayer WriterMemoryDecayer) {
+	s.writerDecay = decayer
 }
 
 func NewChapterService(pool *pgxpool.Pool, chapterRepo *repositories.ChapterRepo, workRepo *repositories.WorkRepo, relevSvc *RelevanceService) *ChapterService {
@@ -60,12 +82,26 @@ func (s *ChapterService) Create(ctx context.Context, workID uuid.UUID, input mod
 	}
 
 	// Best-effort, non-blocking: chapter creation is the "chapter advance"
-	// event that triggers relevance decay for the work's universe.
-	if s.relevSvc != nil && s.workRepo != nil {
+	// event that triggers relevance and writer-memory decay for the work's
+	// universe. Update is an autosave and deliberately has no decay hook.
+	if s.workRepo != nil && (s.relevSvc != nil || s.writerDecay != nil) {
 		if w, err := s.workRepo.FindByID(ctx, workID); err != nil {
 			log.Printf("[chapter] decay: lookup work %s: %v", workID, err)
-		} else if err := s.relevSvc.DecayAll(ctx, w.UniverseID); err != nil {
-			log.Printf("[chapter] decay universe %s: %v", w.UniverseID, err)
+		} else {
+			if s.relevSvc != nil {
+				if err := s.relevSvc.DecayAll(ctx, w.UniverseID); err != nil {
+					log.Printf("[chapter] decay universe %s: %v", w.UniverseID, err)
+				}
+			}
+			if s.writerDecay != nil {
+				decayer := s.writerDecay
+				universeID := w.UniverseID
+				go func() {
+					if err := decayer.DecayForUniverse(context.Background(), universeID); err != nil {
+						log.Printf("[chapter] writer-memory decay universe %s: %v", universeID, err)
+					}
+				}()
+			}
 		}
 	}
 
@@ -111,6 +147,22 @@ func (s *ChapterService) Update(ctx context.Context, id uuid.UUID, input models.
 		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
+	// Stylometry must never add latency to a chapter save. Resolve ownership
+	// after the commit and run the observation pass on a detached context.
+	if s.stylometry != nil && s.universeRepo != nil && c.Content != "" {
+		chapter := *c
+		go func() {
+			ownerCtx := context.Background()
+			u, lookupErr := s.universeRepo.FindByID(ownerCtx, chapter.UniverseID)
+			if lookupErr != nil {
+				log.Printf("[chapter] stylometry owner lookup %s: %v", chapter.ID, lookupErr)
+				return
+			}
+			if _, observeErr := s.stylometry.Observe(ownerCtx, u.UserID, &chapter.UniverseID, chapter.Content); observeErr != nil {
+				log.Printf("[chapter] stylometry chapter %s: %v", chapter.ID, observeErr)
+			}
+		}()
+	}
 	return c, nil
 }
 

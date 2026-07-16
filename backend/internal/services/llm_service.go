@@ -37,6 +37,13 @@ type LLMService interface {
 	ContextBudget() *ContextBudgetManager
 }
 
+// StructuredChat is an optional provider capability used by Writer Memory's
+// promotion step. Keeping it optional preserves compatibility with the small
+// test doubles and third-party adapters that only implement LLMService.
+type StructuredChat interface {
+	ChatStructured(ctx context.Context, model string, messages []QwenMessage, format *ResponseFormat) (string, error)
+}
+
 // LLMHealthChecker is kept separate from LLMService so lightweight health
 // probes do not force unrelated test doubles to implement the whole model
 // surface.

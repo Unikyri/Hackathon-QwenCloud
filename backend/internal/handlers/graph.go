@@ -7,6 +7,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
+	"github.com/quill/backend/internal/middleware"
+	"github.com/quill/backend/internal/models"
 	"github.com/quill/backend/internal/repositories"
 	"github.com/quill/backend/internal/services"
 )
@@ -32,13 +34,23 @@ type Decayer interface {
 	DecayAll(ctx context.Context, universeID uuid.UUID) error
 }
 
+type writerMemoryDecayer interface {
+	DecayForUniverse(ctx context.Context, universeID uuid.UUID) error
+}
+
+type universeOwnerResolver interface {
+	FindByID(ctx context.Context, id uuid.UUID) (*models.Universe, error)
+}
+
 // GraphHandler serves graph-related REST endpoints.
 type GraphHandler struct {
-	graphRepo  graphQuerier
-	memorySvc  *services.MemoryService
-	entityRepo *repositories.EntityRepo
-	embedder   queryEmbedder
-	decayer    Decayer
+	graphRepo     graphQuerier
+	memorySvc     *services.MemoryService
+	entityRepo    *repositories.EntityRepo
+	embedder      queryEmbedder
+	decayer       Decayer
+	writerDecayer writerMemoryDecayer
+	ownerRepo     universeOwnerResolver
 }
 
 // NewGraphHandler creates a graph handler. embedder is nil-allowed: a nil
@@ -65,6 +77,49 @@ func (h *GraphHandler) SetDecayer(d Decayer) {
 	h.decayer = d
 }
 
+func (h *GraphHandler) SetWriterMemoryDecayer(d writerMemoryDecayer) {
+	h.writerDecayer = d
+}
+
+// SetUniverseOwnerRepo enables production ownership checks while keeping the
+// handler constructor compatible with focused tests that use graph seams.
+func (h *GraphHandler) SetUniverseOwnerRepo(repo universeOwnerResolver) {
+	h.ownerRepo = repo
+}
+
+func (h *GraphHandler) authorizeUniverse(c *fiber.Ctx, universeID uuid.UUID) error {
+	if h.ownerRepo == nil {
+		return nil
+	}
+	userID := middleware.GetUserID(c)
+	if userID == uuid.Nil {
+		return fiber.ErrUnauthorized
+	}
+	universe, err := h.ownerRepo.FindByID(c.Context(), universeID)
+	if err != nil {
+		return fiber.ErrNotFound
+	}
+	if universe.UserID != userID {
+		return fiber.ErrForbidden
+	}
+	return nil
+}
+
+func graphOwnershipError(c *fiber.Ctx, err error) error {
+	status := fiber.StatusInternalServerError
+	code := "INTERNAL_ERROR"
+	message := err.Error()
+	switch err {
+	case fiber.ErrUnauthorized:
+		status, code, message = fiber.StatusUnauthorized, "UNAUTHORIZED", "authentication required"
+	case fiber.ErrForbidden:
+		status, code, message = fiber.StatusForbidden, "FORBIDDEN", "universe access denied"
+	case fiber.ErrNotFound:
+		status, code, message = fiber.StatusNotFound, "NOT_FOUND", "universe not found"
+	}
+	return c.Status(status).JSON(fiber.Map{"error": fiber.Map{"code": code, "message": message}})
+}
+
 // FullGraph returns all nodes and edges for a universe's graph.
 // GET /api/v1/universes/:universe_id/graph
 func (h *GraphHandler) FullGraph(c *fiber.Ctx) error {
@@ -73,6 +128,9 @@ func (h *GraphHandler) FullGraph(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe_id"},
 		})
+	}
+	if err := h.authorizeUniverse(c, universeID); err != nil {
+		return graphOwnershipError(c, err)
 	}
 
 	graphName := "universe_" + universeID.String()
@@ -118,6 +176,9 @@ func (h *GraphHandler) Neighbors(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe_id"},
 		})
+	}
+	if err := h.authorizeUniverse(c, universeID); err != nil {
+		return graphOwnershipError(c, err)
 	}
 
 	hops := c.QueryInt("hops", 1)
@@ -183,6 +244,9 @@ func (h *GraphHandler) Recall(c *fiber.Ctx) error {
 	if req.K > 20 {
 		req.K = 20
 	}
+	if err := h.authorizeUniverse(c, universeID); err != nil {
+		return graphOwnershipError(c, err)
+	}
 
 	// Preserve the query through the memory pipeline. Non-empty queries use the
 	// active provider's embedding implementation so vector/keyword pipelines
@@ -240,6 +304,9 @@ func (h *GraphHandler) RecallExplain(c *fiber.Ctx) error {
 	if req.K > 20 {
 		req.K = 20
 	}
+	if err := h.authorizeUniverse(c, universeID); err != nil {
+		return graphOwnershipError(c, err)
+	}
 
 	// Embed the query string before passing to RecallExplain (mirror
 	// ws/hub.go's handleRecallRequest embedding step) — degraded mode only
@@ -274,6 +341,9 @@ func (h *GraphHandler) MemoryStatus(c *fiber.Ctx) error {
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe ID"},
 		})
 	}
+	if err := h.authorizeUniverse(c, universeID); err != nil {
+		return graphOwnershipError(c, err)
+	}
 
 	status, err := h.memorySvc.MemoryStatus(c.Context(), universeID)
 	if err != nil {
@@ -296,6 +366,9 @@ func (h *GraphHandler) RunDecay(c *fiber.Ctx) error {
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe ID"},
 		})
 	}
+	if err := h.authorizeUniverse(c, universeID); err != nil {
+		return graphOwnershipError(c, err)
+	}
 
 	if h.decayer == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
@@ -307,6 +380,13 @@ func (h *GraphHandler) RunDecay(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
 		})
+	}
+	if h.writerDecayer != nil {
+		if err := h.writerDecayer.DecayForUniverse(c.Context(), universeID); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
+			})
+		}
 	}
 
 	return c.JSON(fiber.Map{"ok": true})

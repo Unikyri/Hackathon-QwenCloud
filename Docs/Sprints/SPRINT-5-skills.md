@@ -41,9 +41,9 @@ fixture skill in a test makes loading fail with a precise error.
 
 ---
 
-## Task 5.2 — Migration `024`: universe↔skill activation (SS)
+## Task 5.2 — Migration `025`: universe↔skill activation (SS)
 
-**Files:** `backend/migrations/023_universe_skills.up.sql` / `.down.sql`; universe handler/service
+**Files:** `backend/migrations/025_universe_skills.up.sql` / `.down.sql`; universe handler/service
 
 **Steps:**
 
@@ -139,7 +139,7 @@ category disappear — the full Sprint 4 + 5 demo loop.
 ## Definition of done
 
 - [ ] 15 skills + 20 references load from `backend/skills/` at boot with validation; catalogue endpoint serves frontmatter only.
-- [ ] Migration `024` up/down clean; per-universe activation with sane defaults.
+- [ ] Migration `025` up/down clean; per-universe activation with sane defaults.
 - [ ] Two-stage selection: descriptions-only turbo call, bodies loaded for winners only, genre references filtered by universe tags.
 - [ ] Review is on-demand, margin-only, skill-attributed, preference-suppressed; the no-rewrite guard is code.
 - [ ] Note decisions land as feedback events; the reject-three-times loop works end to end.
