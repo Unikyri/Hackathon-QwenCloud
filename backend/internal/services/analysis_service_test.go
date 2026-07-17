@@ -568,11 +568,43 @@ func TestAnalysisServiceWorkerEmitsTerminalFailure(t *testing.T) {
 		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 			t.Fatalf("unmarshal failure payload: %v", err)
 		}
-		if payload.SubmissionID != "submission-1" || payload.ParagraphRef != "chapter:1" {
+		if payload.SubmissionID != "submission-1" || payload.ParagraphRef != "chapter:1" || payload.UniverseID != universeID {
 			t.Fatalf("terminal correlation = %+v", payload)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for analysis_failed")
+	}
+}
+
+func TestAnalysisServiceBroadcastResultUsesAcceptedJobUniverse(t *testing.T) {
+	hub := &stageRecordingHub{}
+	svc := NewAnalysisService(nil, nil, nil, nil, nil, nil, nil, hub, nil)
+	job := analysisJob{
+		SubmissionID: "submission-1",
+		ParagraphRef: "chapter:1",
+		WorkID:       uuid.New(),
+		ChapterID:    uuid.New(),
+		UniverseID:   uuid.New(),
+		UserID:       uuid.New(),
+	}
+
+	svc.broadcastResult(job, AnalysisResult{
+		SubmissionID: job.SubmissionID,
+		ParagraphRef: job.ParagraphRef,
+		WorkID:       job.WorkID,
+		ChapterID:    job.ChapterID,
+		UniverseID:   uuid.New(), // A result must not override the accepted job scope.
+	})
+
+	if len(hub.messages) != 1 || hub.messages[0].Type != ws.TypeAnalysisResult {
+		t.Fatalf("expected one analysis_result, got %+v", hub.messages)
+	}
+	var payload models.AnalysisResultPayload
+	if err := json.Unmarshal(hub.messages[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal result payload: %v", err)
+	}
+	if payload.UniverseID != job.UniverseID {
+		t.Errorf("result universe_id = %s, want accepted job universe %s", payload.UniverseID, job.UniverseID)
 	}
 }
 
@@ -617,7 +649,7 @@ func (h *stageRecordingHub) rawProgressPayloads() []json.RawMessage {
 func TestSendProgressNilHubNoop(t *testing.T) {
 	svc := NewAnalysisService(nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	// Should not panic with a nil hub.
-	svc.sendProgress(uuid.New(), uuid.New(), "submission-1", "chapter:12", "entities_extracted", nil)
+	svc.sendProgress(uuid.New(), uuid.New(), uuid.New(), "submission-1", "chapter:12", "entities_extracted", nil)
 }
 
 // TestSendProgressSendsPayload verifies sendProgress builds and sends an
@@ -626,14 +658,22 @@ func TestSendProgressSendsPayload(t *testing.T) {
 	hub := &stageRecordingHub{}
 	svc := NewAnalysisService(nil, nil, nil, nil, nil, nil, nil, hub, nil)
 
+	universeID := uuid.New()
 	chapterID := uuid.New()
 	count := 3
-	svc.sendProgress(uuid.New(), chapterID, "submission-1", "chapter:12", "entities_extracted", func(p *models.AnalysisProgressPayload) {
+	svc.sendProgress(uuid.New(), universeID, chapterID, "submission-1", "chapter:12", "entities_extracted", func(p *models.AnalysisProgressPayload) {
 		p.EntityCount = &count
 	})
 
 	if len(hub.types) != 1 || hub.types[0] != "analysis_progress" {
 		t.Fatalf("expected one analysis_progress message, got %v", hub.types)
+	}
+	var payload models.AnalysisProgressPayload
+	if err := json.Unmarshal(hub.messages[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal progress payload: %v", err)
+	}
+	if payload.UniverseID != universeID {
+		t.Errorf("progress universe_id = %s, want %s", payload.UniverseID, universeID)
 	}
 }
 
@@ -683,6 +723,15 @@ func TestProcessJobEmitsProgressInPipelineOrder(t *testing.T) {
 	for i, want := range wantOrder {
 		if gotStages[i] != want {
 			t.Errorf("stage[%d] = %q, want %q (full order: %v)", i, gotStages[i], want, gotStages)
+		}
+	}
+	for _, tBytes := range hub.rawProgressPayloads() {
+		var p models.AnalysisProgressPayload
+		if err := json.Unmarshal(tBytes, &p); err != nil {
+			t.Fatalf("unmarshal progress scope: %v", err)
+		}
+		if p.UniverseID != job.UniverseID {
+			t.Errorf("progress universe_id = %s, want %s", p.UniverseID, job.UniverseID)
 		}
 	}
 }

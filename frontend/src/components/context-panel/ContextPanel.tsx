@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useWSStore, type WSStatus } from '../../stores/wsStore'
 import { ENTITY_TYPE_META } from '../../lib/entityTypes'
 import { api } from '../../lib/api'
@@ -83,6 +83,10 @@ export default function ContextPanel({ status, universeId }: ContextPanelProps) 
   const budget = useWSStore((s) => s.budget)
 
   const [memoryEntities, setMemoryEntities] = useState<MemoryStatusEntity[]>([])
+  const [memoryStatusError, setMemoryStatusError] = useState<string | null>(null)
+  const [memoryStatusRetry, setMemoryStatusRetry] = useState(0)
+  const [memoryStatusUniverse, setMemoryStatusUniverse] = useState<string | null>(null)
+  const memoryStatusUniverseRef = useRef<string | null>(null)
 
   const dismissContradiction = (id: string) => {
     useWSStore.setState((s) => ({ contradictions: s.contradictions.filter((c) => c.id !== id) }))
@@ -91,11 +95,34 @@ export default function ContextPanel({ status, universeId }: ContextPanelProps) 
   // Fetch memory-status on mount and refetch as new pipeline/graph signals
   // arrive (per design: mount + on analysis_progress / graph_updated).
   useEffect(() => {
-    if (!universeId) return
+    if (!universeId) {
+      memoryStatusUniverseRef.current = null
+      setMemoryStatusUniverse(null)
+      setMemoryEntities([])
+      setMemoryStatusError(null)
+      return
+    }
+    const hasCurrentMemoryStatus = memoryStatusUniverseRef.current === universeId
+    if (!hasCurrentMemoryStatus) setMemoryEntities([])
+    let cancelled = false
+    setMemoryStatusError(null)
     api.getMemoryStatus(universeId)
-      .then((res) => setMemoryEntities(res.entities))
-      .catch(() => { /* keep last-known entities on transient fetch failure */ })
-  }, [universeId, pipeline?.stage, graphPings.length])
+      .then((res) => {
+        if (cancelled) return
+        memoryStatusUniverseRef.current = universeId
+        setMemoryStatusUniverse(universeId)
+        setMemoryEntities(res.entities || [])
+      })
+      .catch(() => {
+        if (cancelled) return
+        setMemoryStatusError(
+          hasCurrentMemoryStatus
+            ? 'Could not refresh the lifecycle. Showing last-known data.'
+            : 'Could not load the memory lifecycle. Retry to try again.',
+        )
+      })
+    return () => { cancelled = true }
+  }, [universeId, pipeline?.stage, graphPings.length, memoryStatusRetry])
 
   const statusClass =
     status === 'open' ? styles.statusOpen
@@ -104,6 +131,7 @@ export default function ContextPanel({ status, universeId }: ContextPanelProps) 
 
   const isConnected = status === 'open'
   const currentStageIdx = pipeline ? PIPELINE_STAGES.findIndex((s) => s.key === pipeline.stage) : -1
+  const hasCurrentMemoryStatus = memoryStatusUniverse === universeId
 
   return (
     <div className={styles.panel}>
@@ -303,6 +331,14 @@ export default function ContextPanel({ status, universeId }: ContextPanelProps) 
             <span className={styles.sectionKicker}>Entity Lifecycle</span>
           </div>
           <div className={styles.sectionBody}>
+            {memoryStatusError && (
+              <div className={styles.memoryStatusError} role={hasCurrentMemoryStatus ? 'status' : 'alert'}>
+                <span>{memoryStatusError}</span>
+                <button className={styles.memoryStatusRetry} type="button" onClick={() => setMemoryStatusRetry((attempt) => attempt + 1)}>
+                  Retry
+                </button>
+              </div>
+            )}
             {memoryEntities.length === 0 ? (
               <p className={styles.emptyPlaceholder}>Memory lifecycle appears once entities are tracked</p>
             ) : (

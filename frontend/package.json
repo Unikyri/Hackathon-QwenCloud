@@ -7,8 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "node ./scripts/run-vitest.mjs run",
+    "test:watch": "node ./scripts/run-vitest.mjs",
+    "test:e2e": "node ./scripts/run-playwright.mjs test --config=../e2e/playwright.config.ts"
   },
   "dependencies": {
     "@tiptap/extension-highlight": "^2.4.0",
@@ -17,13 +18,17 @@
     "@tiptap/extension-underline": "^2.27.2",
     "@tiptap/react": "^2.4.0",
     "@tiptap/starter-kit": "^2.4.0",
+    "cytoscape": "^3.34.0",
+    "cytoscape-fcose": "^2.2.0",
+    "lucide-react": "^1.24.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.23.1",
-    "reactflow": "^11.11.4",
+    "sonner": "^2.0.7",
     "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.61.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

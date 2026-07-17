@@ -74,21 +74,19 @@ describe('api', () => {
     })
   })
 
-  describe('getGraph', () => {
-    it('calls GET /universes/:id/graph and returns ReactFlow-shaped nodes and edges', async () => {
-      const graph = {
-        nodes: [{ id: 'n1', type: 'character', position: { x: 0, y: 0 }, data: { name: 'Alice' } }],
-        edges: [{ id: 'e1', source: 'n1', target: 'n2', label: 'knows' }],
-      }
-      mockFetchResponse(graph)
+  describe('plot-hole decisions', () => {
+    it('calls the real resolve and dismiss endpoints', async () => {
+      mockFetchResponse({})
+      await api.resolvePlotHole('uni-1', 'plot-1')
+      let [url, init] = fetchMock.mock.calls[0]
+      expect(url).toBe(`${API_BASE}/universes/uni-1/plot-holes/plot-1/resolve`)
+      expect(init.method).toBe('PUT')
 
-      const result = await api.getGraph('uni-1')
-
-      expect(fetchMock).toHaveBeenCalledTimes(1)
-      const [url] = fetchMock.mock.calls[0]
-      expect(url).toBe(`${API_BASE}/universes/uni-1/graph`)
-      expect(result.nodes).toEqual(graph.nodes)
-      expect(result.edges).toEqual(graph.edges)
+      mockFetchResponse({})
+      await api.dismissPlotHole('uni-1', 'plot-1')
+      ;[url, init] = fetchMock.mock.calls[1]
+      expect(url).toBe(`${API_BASE}/universes/uni-1/plot-holes/plot-1/dismiss`)
+      expect(init.method).toBe('PUT')
     })
   })
 
@@ -165,6 +163,26 @@ describe('api', () => {
 
       const [, init] = fetchMock.mock.calls[0]
       expect(JSON.parse(init.body)).toEqual({ query: 'q', k: 10 })
+    })
+  })
+
+  describe('demo endpoints', () => {
+    it('sends the opaque demo session separately from the bearer token', async () => {
+      const bearerToken = 'jwt-bearer-token'
+      const sessionID = '8f0a33c4-5b9d-4fb5-a7ef-3ec2bc20e0a1'
+      localStorage.setItem('token', bearerToken)
+      mockFetchResponse({ status: 'success', universe_id: 'demo-universe', message: 'ready' })
+
+      await api.demoClone(sessionID)
+
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(url).toBe(`${API_BASE}/demo/clone`)
+      expect(init.method).toBe('POST')
+      expect(init.headers).toMatchObject({
+        Authorization: `Bearer ${bearerToken}`,
+        'X-Session-ID': sessionID,
+      })
+      expect(init.headers['X-Session-ID']).not.toBe(bearerToken)
     })
   })
 })

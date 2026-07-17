@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import type { SkillCatalogueItem } from '../lib/types'
@@ -10,6 +10,11 @@ const GROUP_LABELS: Record<string, string> = {
   genre: 'Genre',
 }
 
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message
+  return 'The request could not be completed. Please try again.'
+}
+
 export default function SkillsPage() {
   const { universeId } = useParams<{ universeId: string }>()
   const [catalogue, setCatalogue] = useState<SkillCatalogueItem[]>([])
@@ -17,23 +22,47 @@ export default function SkillsPage() {
   const [savedNames, setSavedNames] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const loadRequestId = useRef(0)
+
+  const loadSkills = useCallback(async () => {
+    if (!universeId) {
+      setLoading(false)
+      return
+    }
+
+    const requestId = ++loadRequestId.current
+    setLoading(true)
+    setLoadError(null)
+    setSaveError(null)
+    setSaved(false)
+    try {
+      const [catalogueResponse, activeResponse] = await Promise.all([
+        api.getSkills(),
+        api.getUniverseSkills(universeId),
+      ])
+      if (requestId !== loadRequestId.current) return
+
+      const names = activeResponse.skills.map((skill) => skill.skill_name)
+      setCatalogue(catalogueResponse.skills)
+      setActiveNames(names)
+      setSavedNames(names)
+    } catch (requestError) {
+      if (requestId !== loadRequestId.current) return
+      setLoadError(errorMessage(requestError))
+    } finally {
+      if (requestId === loadRequestId.current) setLoading(false)
+    }
+  }, [universeId])
 
   useEffect(() => {
-    if (!universeId) return
-    setLoading(true)
-    setError(null)
-    Promise.all([api.getSkills(), api.getUniverseSkills(universeId)])
-      .then(([catalogueResponse, activeResponse]) => {
-        const names = activeResponse.skills.map((skill) => skill.skill_name)
-        setCatalogue(catalogueResponse.skills)
-        setActiveNames(names)
-        setSavedNames(names)
-      })
-      .catch((loadError) => setError((loadError as Error).message || 'Could not load editorial skills'))
-      .finally(() => setLoading(false))
-  }, [universeId])
+    void loadSkills()
+    return () => {
+      loadRequestId.current += 1
+    }
+  }, [loadSkills])
 
   const groupedSkills = useMemo(() => {
     const groups = new Map<string, SkillCatalogueItem[]>()
@@ -49,6 +78,7 @@ export default function SkillsPage() {
 
   const toggle = (skillName: string) => {
     setSaved(false)
+    setSaveError(null)
     setActiveNames((current) => current.includes(skillName)
       ? current.filter((name) => name !== skillName)
       : [...current, skillName])
@@ -57,7 +87,7 @@ export default function SkillsPage() {
   const save = async () => {
     if (!universeId || saving) return
     setSaving(true)
-    setError(null)
+    setSaveError(null)
     setSaved(false)
     try {
       const response = await api.updateUniverseSkills(universeId, activeNames)
@@ -65,8 +95,8 @@ export default function SkillsPage() {
       setActiveNames(names)
       setSavedNames(names)
       setSaved(true)
-    } catch (saveError) {
-      setError((saveError as Error).message || 'Could not save skill settings')
+    } catch (requestError) {
+      setSaveError(errorMessage(requestError))
     } finally {
       setSaving(false)
     }
@@ -93,9 +123,16 @@ export default function SkillsPage() {
         </div>
       </div>
 
-      {error && <p className={styles.error} role="alert">{error}</p>}
+      {saveError && <p className={styles.error} role="alert">Could not save skill settings: {saveError} Your current selection is still unsaved; try again when ready.</p>}
+      {saved && <p className={styles.savedStatus} role="status" aria-live="polite">Skill settings saved.</p>}
       {loading ? (
-        <div className={styles.state}>Loading skill catalogue…</div>
+        <div className={styles.state} role="status" aria-live="polite">Loading skill catalogue…</div>
+      ) : loadError ? (
+        <section className={`${styles.state} ${styles.errorState}`} role="alert">
+          <p>Could not load editorial skills: {loadError}</p>
+          <p>Retry to load the catalogue and your saved skill settings.</p>
+          <button className={styles.retryButton} type="button" onClick={() => void loadSkills()}>Retry loading skills</button>
+        </section>
       ) : catalogue.length === 0 ? (
         <div className={styles.state}>No editorial skills are available.</div>
       ) : (
@@ -111,7 +148,7 @@ export default function SkillsPage() {
                   const active = activeNames.includes(skill.name)
                   return (
                     <label key={skill.name} className={`${styles.card} ${active ? styles.cardActive : ''}`}>
-                      <input type="checkbox" checked={active} onChange={() => toggle(skill.name)} />
+                      <input type="checkbox" checked={active} disabled={saving} onChange={() => toggle(skill.name)} />
                       <span className={styles.cardBody}>
                         <span className={styles.cardTopline}>
                           <span className={styles.skillName}>{skill.name}</span>

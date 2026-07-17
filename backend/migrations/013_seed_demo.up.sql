@@ -1,10 +1,12 @@
--- Seed demo user and template universe
+-- Seed the internal demo template account and template universe. The account
+-- intentionally has no usable login credential; visitors receive their own
+-- authenticated account before cloning this template.
 INSERT INTO users (id, email, password_hash, display_name, created_at, updated_at)
 VALUES (
     '00000000-0000-0000-0000-000000000001',
     'demo@quill.ai',
-    '$2a$12$S0AJJxJbSguEh6wjh66IFOchI3klGxKghe7C0IsSRk.vCgOCS0.dO',
-    'Demo Writer',
+    '!',
+    'Internal Demo Template',
     NOW(),
     NOW()
 ) ON CONFLICT (email) DO NOTHING;

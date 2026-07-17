@@ -1,124 +1,199 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import type { RecallExplanation } from '../../lib/types'
 import styles from './FusionExplorer.module.css'
 
 interface FusionExplorerProps {
   universeId: string
-  onResult?: (result: RecallExplanation) => void
+  onResult?: (result: RecallExplanation | null) => void
 }
 
-// Same RRF pipelines + colors as ContextPanel's SOURCE_META, re-declared
-// here rather than imported (ContextPanel.tsx stays unmodified per spec).
 const PIPELINES = ['vector', 'graph', 'recency', 'keyword', 'consolidated', 'preference'] as const
 
-const PIPELINE_META: Record<string, { color: string }> = {
-  vector: { color: 'var(--teal)' },
-  graph: { color: 'var(--node-worldrule)' },
-  recency: { color: 'var(--gold-ink)' },
-  keyword: { color: 'var(--muted)' },
-  consolidated: { color: 'var(--node-event)' },
-  preference: { color: 'var(--gold)' },
+const PIPELINE_META: Record<string, { color: string; label: string }> = {
+  vector: { color: 'var(--teal)', label: 'Semantic matches' },
+  graph: { color: 'var(--node-worldrule)', label: 'Story relationships' },
+  recency: { color: 'var(--gold-ink)', label: 'Recent mentions' },
+  keyword: { color: 'var(--muted)', label: 'Exact terms' },
+  consolidated: { color: 'var(--node-event)', label: 'Consolidated lore' },
+  preference: { color: 'var(--gold)', label: 'Writer preferences' },
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : 'Quill could not explain this recall.'
 }
 
 export default function FusionExplorer({ universeId, onResult }: FusionExplorerProps) {
   const [query, setQuery] = useState('')
   const [result, setResult] = useState<RecallExplanation | null>(null)
+  const [loadedUniverseId, setLoadedUniverseId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [loadingUniverseId, setLoadingUniverseId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [errorUniverseId, setErrorUniverseId] = useState<string | null>(null)
+  const recallRequestId = useRef(0)
+  const currentUniverseId = useRef(universeId)
+  const onResultRef = useRef(onResult)
+  currentUniverseId.current = universeId
+  onResultRef.current = onResult
 
-  const handleExplain = async () => {
-    setLoading(true)
+  useEffect(() => {
+    recallRequestId.current += 1
+    setQuery('')
+    setResult(null)
+    setLoadedUniverseId(null)
+    setLoading(false)
+    setLoadingUniverseId(null)
     setError(null)
+    setErrorUniverseId(null)
+    onResultRef.current?.(null)
+  }, [universeId])
+
+  useEffect(() => () => {
+    recallRequestId.current += 1
+  }, [])
+
+  const explain = async () => {
+    const normalizedQuery = query.trim()
+    if (!normalizedQuery) {
+      setError('Ask a specific question about your story first.')
+      setErrorUniverseId(universeId)
+      return
+    }
+
+    const requestId = ++recallRequestId.current
+    const requestUniverseId = universeId
+    const isCurrentRequest = () => (
+      recallRequestId.current === requestId && currentUniverseId.current === requestUniverseId
+    )
+    setLoading(true)
+    setLoadingUniverseId(requestUniverseId)
+    setError(null)
+    setErrorUniverseId(null)
+    setResult(null)
+    setLoadedUniverseId(null)
+    onResultRef.current?.(null)
     try {
-      const res = await api.recallExplain(universeId, query, 10)
-      setResult(res)
-      onResult?.(res)
-    } catch {
-      setError('Failed to explain recall — try again')
+      const response = await api.recallExplain(universeId, normalizedQuery, 10)
+      if (!isCurrentRequest()) return
+      setResult(response)
+      setLoadedUniverseId(requestUniverseId)
+      onResultRef.current?.(response)
+    } catch (requestError) {
+      if (!isCurrentRequest()) return
+      setError(errorMessage(requestError))
+      setErrorUniverseId(requestUniverseId)
     } finally {
-      setLoading(false)
+      if (isCurrentRequest()) setLoading(false)
     }
   }
 
+  const hasCurrentResult = loadedUniverseId === universeId
+  const hasCurrentError = errorUniverseId === universeId
+  const isRecalling = loading && loadingUniverseId === universeId
+  const currentResult = hasCurrentResult ? result : null
+  const totalContributions = currentResult?.items.reduce((count, item) => count + item.contributions.length, 0) || 0
+
   return (
-    <div className={styles.wrap}>
+    <section className={styles.wrap} aria-labelledby="memory-question-title">
       <div className={styles.header}>
-        <span className={styles.kicker}>Fusion Explorer</span>
-        <div className={styles.searchRow}>
-          <input
-            className={styles.input}
-            type="text"
-            value={query}
-            placeholder="Search characters, places, events…"
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <button className={styles.explainBtn} onClick={handleExplain} disabled={loading}>
-            Explain
-          </button>
-        </div>
+        <p className={styles.kicker}>Story recall</p>
+        <h1 id="memory-question-title">What does Quill remember?</h1>
+        <p className={styles.intro}>Ask about your story. Quill returns the evidence it retrieved; it does not invent a prose answer when there is no matching memory.</p>
       </div>
 
-      {loading && <p className={styles.status}>Explaining…</p>}
-      {error && <p className={styles.statusError}>{error}</p>}
+      <form className={styles.searchRow} onSubmit={(event) => { event.preventDefault(); void explain() }}>
+        <label className={styles.questionLabel} htmlFor="memory-query">Ask about your story</label>
+        <div className={styles.searchControls}>
+          <input
+            id="memory-query"
+            className={styles.input}
+            type="search"
+            value={query}
+            placeholder="Where was the oath made?"
+            onChange={(event) => setQuery(event.target.value)}
+            disabled={isRecalling}
+          />
+          <button className={styles.explainBtn} type="submit" disabled={isRecalling}>
+            {isRecalling ? 'Recalling…' : 'Recall'}
+          </button>
+        </div>
+      </form>
 
-      {!result && !loading && !error && (
-        <p className={styles.hint}>
-          Type a query above and click Explain to see how memories are fused from different sources
-        </p>
+      {isRecalling && <p className={styles.status} role="status" aria-live="polite">Searching Quill’s available memory evidence…</p>}
+      {hasCurrentError && error && (
+        <div className={styles.errorState} role="alert">
+          <p>{error}</p>
+          <button type="button" onClick={() => void explain()} disabled={isRecalling}>Retry</button>
+        </div>
       )}
 
-      {result && !loading && !error && (
-        <>
-          <div className={styles.pipelineCols}>
-            {PIPELINES.map((pipeline) => (
-              <div key={pipeline} className={styles.pipelineCol} data-testid={`pipeline-column-${pipeline}`}>
-                <span className={styles.pipelineDot} style={{ background: PIPELINE_META[pipeline].color }} />
-                <span className={styles.pipelineLabel}>{pipeline}</span>
-                <span className={styles.pipelineCount}>{result.pipeline_sizes[pipeline] ?? 0}</span>
-              </div>
-            ))}
+      {!currentResult && !isRecalling && !hasCurrentError && (
+        <p className={styles.hint}>Start with one question. The retrieved answer and its evidence appear here first.</p>
+      )}
+
+      {currentResult && !isRecalling && !hasCurrentError && (
+        <div className={styles.answer}>
+          <div className={styles.answerHeader}>
+            <div>
+              <p className={styles.answerKicker}>Retrieved answer</p>
+              <h2>What Quill found about “{currentResult.query}”</h2>
+            </div>
+            <span className={styles.answerCount}>{currentResult.items.length} {currentResult.items.length === 1 ? 'memory' : 'memories'}</span>
           </div>
 
-          {result.items.length === 0 ? (
-            <p className={styles.emptyPlaceholder}>No results for this query</p>
+          {currentResult.items.length === 0 ? (
+            <p className={styles.emptyPlaceholder}>Quill found no matching memory. Try a different name or add/import more story material first.</p>
           ) : (
-            <ul className={styles.fusedList}>
-              {result.items.map((item) => (
-                <li key={item.id} className={styles.fusedItem} data-testid={`fused-item-${item.id}`}>
-                  <div className={styles.fusedItemHeader}>
-                    <span className={styles.fusedFact}>{item.fact}</span>
-                    <span className={styles.fusedScore}>{item.rrf_score.toFixed(3)}</span>
-                    <span
-                      className={item.fit_in_budget ? styles.fitBadge : styles.dropBadge}
-                      data-testid={`fit-in-budget-${item.id}`}
-                    >
-                      {item.fit_in_budget ? 'Fit' : 'Dropped'}
-                    </span>
-                    {item.rerank_delta !== undefined && item.rerank_delta !== 0 && (
-                      <span className={styles.contribution} data-testid={`rerank-delta-${item.id}`}>
-                        {item.rerank_delta > 0 ? '↑' : '↓'}{Math.abs(item.rerank_delta)} rerank
-                      </span>
-                    )}
-                  </div>
-                  <div className={styles.contributions}>
-                    {item.contributions.map((c) => (
-                      <span
-                        key={c.pipeline}
-                        className={styles.contribution}
-                        data-testid={`contribution-${item.id}-${c.pipeline}`}
-                        style={{ borderColor: PIPELINE_META[c.pipeline]?.color ?? 'var(--muted)' }}
-                      >
-                        {c.pipeline} #{c.rank} (+{c.delta.toFixed(2)})
-                      </span>
-                    ))}
-                  </div>
+            <ol className={styles.evidenceList} aria-label="Retrieved memory evidence">
+              {currentResult.items.map((item) => (
+                <li key={item.id} className={styles.evidenceItem} data-testid={`fused-item-${item.id}`}>
+                  <span>{item.fact}</span>
+                  <span className={item.fit_in_budget ? styles.fitBadge : styles.dropBadge} data-testid={`fit-in-budget-${item.id}`}>
+                    {item.fit_in_budget ? 'Included in context' : 'Held back by budget'}
+                  </span>
                 </li>
               ))}
-            </ul>
+            </ol>
           )}
-        </>
+
+          <details className={styles.explanation}>
+            <summary>See how this recall was assembled ({totalContributions} pipeline contributions)</summary>
+            <div className={styles.explanationBody}>
+              <div className={styles.pipelineCols} aria-label="Recall pipeline availability">
+                {PIPELINES.map((pipeline) => (
+                  <div key={pipeline} className={styles.pipelineCol} data-testid={`pipeline-column-${pipeline}`}>
+                    <span className={styles.pipelineDot} style={{ background: PIPELINE_META[pipeline].color }} />
+                    <span className={styles.pipelineLabel}>{PIPELINE_META[pipeline].label}</span>
+                    <span className={styles.pipelineCount}>{currentResult.pipeline_sizes[pipeline] ?? 0}</span>
+                  </div>
+                ))}
+              </div>
+              {currentResult.items.length > 0 && (
+                <ul className={styles.contributionList} aria-label="Per-memory pipeline contribution">
+                  {currentResult.items.map((item) => (
+                    <li key={`${item.id}-contributions`}>
+                      <span className={styles.contributionFact}>{item.fact}</span>
+                      <span className={styles.contributions}>
+                        {item.contributions.length === 0 ? 'No pipeline contribution details were returned.' : item.contributions.map((contribution) => (
+                          <span
+                            key={contribution.pipeline}
+                            className={styles.contribution}
+                            data-testid={`contribution-${item.id}-${contribution.pipeline}`}
+                            style={{ borderColor: PIPELINE_META[contribution.pipeline]?.color ?? 'var(--muted)' }}
+                          >
+                            {PIPELINE_META[contribution.pipeline]?.label ?? contribution.pipeline} #{contribution.rank}
+                          </span>
+                        ))}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </details>
+        </div>
       )}
-    </div>
+    </section>
   )
 }

@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -177,8 +178,11 @@ func TestContradictionRepoResolve(t *testing.T) {
 	}
 
 	now := time.Now()
-	if err := repo.Resolve(ctx, c.ID, &now); err != nil {
+	if err := repo.Resolve(ctx, c.ID, universe.ID, &now); err != nil {
 		t.Fatalf("Resolve: %v", err)
+	}
+	if err := repo.Dismiss(ctx, c.ID, uuid.New()); !errors.Is(err, ErrContradictionNotFound) {
+		t.Fatalf("Dismiss with foreign universe error = %v, want ErrContradictionNotFound", err)
 	}
 
 	// Re-fetch to verify

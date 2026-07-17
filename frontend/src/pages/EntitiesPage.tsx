@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { parseVertexRaw } from '../lib/graphParse'
 import { ENTITY_TYPES, ENTITY_TYPE_META, type EntityType } from '../lib/entityTypes'
+import PageStatus from '../components/shared/PageStatus'
 import styles from './EntitiesPage.module.css'
 
 interface EntitySummary {
@@ -35,26 +36,56 @@ function EntityDetail({ entityId, universeId }: { entityId: string; universeId: 
   const [related, setRelated] = useState<RelatedEntity[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [relatedError, setRelatedError] = useState<string | null>(null)
+  const [entityRetry, setEntityRetry] = useState(0)
+  const [relatedRetry, setRelatedRetry] = useState(0)
 
   useEffect(() => {
-    if (!entityId) return
-    setLoading(true); setError(null)
+    if (!entityId) {
+      setLoading(false)
+      setEntity(null)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    setEntity(null)
+    setRelated([])
+    setRelatedError(null)
     api.getEntity(entityId)
       .then((res: { entity: Entity }) => {
+        if (cancelled) return
         setEntity(res.entity)
         setLoading(false)
-        return api.getEntityNeighbors(entityId, res.entity.universe_id).then((g) => {
-          const others = g.nodes
-            .map((n) => parseVertexRaw(String(n.properties?.raw || '')))
-            .filter((v) => v.entityId && v.entityId !== entityId)
-          setRelated(others.map((v) => ({ id: v.entityId, name: v.name, type: v.type })))
-        })
       })
-      .catch((err: Error) => { setError(err.message); setLoading(false) })
-  }, [entityId])
+      .catch(() => {
+        if (cancelled) return
+        setError('Could not load this entity. Retry to try again.')
+        setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [entityId, entityRetry])
 
-  if (loading) return <p className={styles.loadingText}>Loading entity…</p>
-  if (error) return <p className={styles.loadingText} style={{ color: 'var(--danger)' }}>Error: {error}</p>
+  useEffect(() => {
+    if (!entity) return
+    let cancelled = false
+    setRelatedError(null)
+    api.getEntityNeighbors(entity.id, entity.universe_id)
+      .then((graph) => {
+        if (cancelled) return
+        const others = graph.nodes
+          .map((node) => parseVertexRaw(String(node.properties?.raw || '')))
+          .filter((vertex) => vertex.entityId && vertex.entityId !== entity.id)
+        setRelated(others.map((vertex) => ({ id: vertex.entityId, name: vertex.name, type: vertex.type })))
+      })
+      .catch(() => {
+        if (!cancelled) setRelatedError('Could not load direct relations. Retry to try again.')
+      })
+    return () => { cancelled = true }
+  }, [entity?.id, entity?.universe_id, relatedRetry])
+
+  if (loading) return <PageStatus loading />
+  if (error) return <PageStatus error={error} onRetry={() => setEntityRetry((attempt) => attempt + 1)} />
   if (!entity) return null
 
   const meta = ENTITY_TYPE_META[entity.type as keyof typeof ENTITY_TYPE_META] || ENTITY_TYPE_META.character
@@ -152,6 +183,14 @@ function EntityDetail({ entityId, universeId }: { entityId: string; universeId: 
           </div>
         </div>
       )}
+      {relatedError && (
+        <div className={`${styles.relationsCard} ${styles.relationError}`} role="alert">
+          <p>
+            {relatedError}{' '}
+            <button className={styles.relationRetry} type="button" onClick={() => setRelatedRetry((attempt) => attempt + 1)}>Retry</button>
+          </p>
+        </div>
+      )}
     </>
   )
 }
@@ -164,6 +203,9 @@ export default function EntitiesPage() {
   const [entities, setEntities] = useState<EntitySummary[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [listError, setListError] = useState<string | null>(null)
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
+  const [listRetry, setListRetry] = useState(0)
   const [filteredTotal, setFilteredTotal] = useState(0)
   const [countsByType, setCountsByType] = useState<Record<EntityType, number>>(emptyTypeCounts)
   const [search, setSearch] = useState('')
@@ -181,6 +223,8 @@ export default function EntitiesPage() {
     setCountsByType(emptyTypeCounts())
     setLoading(true)
     setLoadingMore(false)
+    setListError(null)
+    setLoadMoreError(null)
 
     const params: Record<string, string> = { limit: String(ENTITY_PAGE_SIZE), page: '1' }
     if (filter !== 'All') params.type = filter
@@ -195,19 +239,20 @@ export default function EntitiesPage() {
         setCountsByType({ ...emptyTypeCounts(), ...(res.counts_by_type || {}) })
       })
       .catch(() => {
-        if (!cancelled) setEntities([])
+        if (!cancelled) setListError('Could not load entities for this universe. Retry to try again.')
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
       })
 
     return () => { cancelled = true }
-  }, [universeId, filter, search])
+  }, [universeId, filter, search, listRetry])
 
   const loadMore = async () => {
     if (!universeId || loadingMore) return
     const requestQueryKey = queryKey
     setLoadingMore(true)
+    setLoadMoreError(null)
 
     const params: Record<string, string> = {
       limit: String(ENTITY_PAGE_SIZE),
@@ -221,6 +266,10 @@ export default function EntitiesPage() {
       if (activeQueryKey.current !== requestQueryKey) return
       setEntities((current) => [...current, ...(res.entities || [])])
       setFilteredTotal(res.pagination?.total ?? filteredTotal)
+    } catch {
+      if (activeQueryKey.current === requestQueryKey) {
+        setLoadMoreError('Could not load more entities. Showing the results already loaded.')
+      }
     } finally {
       if (activeQueryKey.current === requestQueryKey) setLoadingMore(false)
     }
@@ -269,7 +318,9 @@ export default function EntitiesPage() {
         </div>
 
         <div className={styles.entityList}>
-          {loading ? (
+          {listError ? (
+            <PageStatus error={listError} onRetry={() => setListRetry((attempt) => attempt + 1)} />
+          ) : loading ? (
             Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className={styles.entityListItem}>
                 <div className={`skeleton ${styles.entityAvatar}`} style={{ background: 'var(--surface-sunken)' }} />
@@ -311,6 +362,12 @@ export default function EntitiesPage() {
                 <button className={styles.loadMoreButton} onClick={() => void loadMore()} disabled={loadingMore}>
                   {loadingMore ? 'Loading…' : `Load more (${entities.length} of ${filteredTotal})`}
                 </button>
+              )}
+              {loadMoreError && (
+                <p className={styles.loadMoreError} role="status">
+                  {loadMoreError}{' '}
+                  <button type="button" onClick={() => void loadMore()}>Retry</button>
+                </p>
               )}
             </>
           )}

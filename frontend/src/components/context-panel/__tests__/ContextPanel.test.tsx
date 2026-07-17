@@ -172,3 +172,40 @@ describe('ContextPanel — Entity Lifecycle sparkline', () => {
     expect(screen.queryByTestId('sparkline-dot-e2')).not.toBeInTheDocument()
   })
 })
+
+describe('ContextPanel — lifecycle fetch failures', () => {
+  it('shows an accessible retry when the lifecycle cannot be loaded', async () => {
+    ;(api.getMemoryStatus as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ consolidated_count: 0, entities: [] })
+
+    render(<ContextPanel status="open" universeId="u1" />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the memory lifecycle.')
+    screen.getByRole('button', { name: 'Retry' }).click()
+
+    await waitFor(() => expect(api.getMemoryStatus).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('keeps the last-known lifecycle visible and labels it when refresh fails', async () => {
+    ;(api.getMemoryStatus as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        consolidated_count: 0,
+        entities: [{
+          id: 'e1', name: 'Alice', type: 'character', relevance_score: 0.5, status: 'active',
+          consolidated: false, lifecycle: 'active', history: [],
+        }],
+      })
+      .mockRejectedValue(new Error('offline'))
+
+    render(<ContextPanel status="open" universeId="u1" />)
+    await screen.findByText('Alice')
+
+    useWSStore.setState({ pipeline: { stage: 'entities_extracted' } })
+
+    expect(await screen.findByText('Could not refresh the lifecycle. Showing last-known data.')).toBeInTheDocument()
+    expect(screen.getByText('Alice')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Retry')
+  })
+})

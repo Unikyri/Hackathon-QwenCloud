@@ -5,7 +5,7 @@
 Sprints execute **strictly in order** — each one's verification depends on the previous
 one's guarantees. The chain of reasoning: fix the ruler (0) → prove the core (1) → make it
 fast (2) → upgrade the engine (3) → remember the writer (4) → apply the craft (5) → polish
-and open up (6).
+and open up (6) → make the product’s real intelligence legible to a jury (7).
 
 | Sprint | Tier | Theme | SRS sections | Migrations |
 |---|---|---|---|---|
@@ -16,6 +16,13 @@ and open up (6).
 | [Sprint 4](./SPRINT-4-writer-memory.md) | P2 | Writer Memory: stylometry, promotion loop, recall conditioning, evidence trail | §6 (WM, RC, EX, CS) | `024` |
 | [Sprint 5](./SPRINT-5-skills.md) | P2 | Skill loading/selection machinery, craft review (content already authored) | §7 (SF, SS, CV) | `025` |
 | [Sprint 6](./SPRINT-6-editor-mcp.md) | P3 | Autosave durability, import/export, highlighting, candidates tray, MCP | §8–§9 (EH, EC, ID, MC) | — |
+| [Sprint 7](./SPRINT-7.md) | Demo-critical | Jury-led frontend refactor: Quiet Studio shell, direct feedback, accessible genres, a consolidated writer journey, relationship map, and MemoryAgent proof | Sprint 7 plan | — |
+
+## Sprint 7 status
+
+**In progress:** the Sprint 7 row describes active design and product scope, not verified
+completion. Task 7.7 in [Sprint 7](./SPRINT-7.md) remains the gate for test, build,
+accessibility, and judge-demo evidence.
 
 ## Model & quota strategy
 
@@ -59,4 +66,9 @@ Quill is text-only.
 - All AGE access through `withAgeTx`/`withAgeConn`; all LLM-derived Cypher identifiers
   through `validCypherIdentifier` (NF-1/NF-2).
 - No claimed improvement without a recorded number (SRS §11).
-- New UI follows `design.md` (palette, inline glyphs, no chart libraries).
+- New or refactored UI follows `design.md`: the Quiet Studio light system, semantic
+  paper/ink/pine-teal/amber/coral/violet tokens, Newsreader + Spline Sans, Lucide icons,
+  direct feedback, accessible focus/skip behavior, and reduced-motion CSS. This is an
+  adoption standard; it does not certify unmigrated legacy routes.
+- Sprint 7 relationship maps target Cytoscape + fCoSE; React Flow is not the destination.
+  Small data visuals remain native/lightweight rather than adding a general charting library.

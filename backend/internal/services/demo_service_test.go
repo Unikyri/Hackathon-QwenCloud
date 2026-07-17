@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -13,6 +14,8 @@ import (
 )
 
 const templateUniverseID = "00000000-0000-0000-0000-000000000002"
+
+var demoTemplateUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 func TestRemapUUIDsCorrect(t *testing.T) {
 	m := map[string]string{
@@ -36,9 +39,22 @@ func TestRemapUUIDsEmpty(t *testing.T) {
 	}
 }
 
+func TestDemoServiceRejectsBearerTokenAsSessionID(t *testing.T) {
+	svc := &DemoService{}
+	userID := uuid.New()
+	legacyToken := "eyJhbGciOiJIUzI1NiJ9.payload.signature"
+
+	if _, err := svc.CloneUniverse(context.Background(), userID, legacyToken); !errors.Is(err, ErrDemoSessionInvalid) {
+		t.Fatalf("CloneUniverse error = %v, want ErrDemoSessionInvalid", err)
+	}
+	if _, err := svc.ResetUniverse(context.Background(), userID, legacyToken); !errors.Is(err, ErrDemoSessionInvalid) {
+		t.Fatalf("ResetUniverse error = %v, want ErrDemoSessionInvalid", err)
+	}
+}
+
 func TestCloneUniverseDeepCopy(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "014")
+	testutil.RunMigrationsUpTo(t, pool, "021")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
@@ -51,7 +67,7 @@ func TestCloneUniverseDeepCopy(t *testing.T) {
 	sessionID := uuid.NewString()
 
 	// Clone
-	newID, err := svc.CloneUniverse(ctx, sessionID)
+	newID, err := svc.CloneUniverse(ctx, demoTemplateUserID, sessionID)
 	if err != nil {
 		t.Fatalf("CloneUniverse: %v", err)
 	}
@@ -143,7 +159,7 @@ func TestCloneUniverseDeepCopy(t *testing.T) {
 
 func TestCloneUniverseIdempotent(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "014")
+	testutil.RunMigrationsUpTo(t, pool, "021")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
@@ -156,13 +172,13 @@ func TestCloneUniverseIdempotent(t *testing.T) {
 	sessionID := uuid.NewString()
 
 	// First clone
-	id1, err := svc.CloneUniverse(ctx, sessionID)
+	id1, err := svc.CloneUniverse(ctx, demoTemplateUserID, sessionID)
 	if err != nil {
 		t.Fatalf("first CloneUniverse: %v", err)
 	}
 
 	// Second clone (same session) — should return same ID
-	id2, err := svc.CloneUniverse(ctx, sessionID)
+	id2, err := svc.CloneUniverse(ctx, demoTemplateUserID, sessionID)
 	if err != nil {
 		t.Fatalf("second CloneUniverse: %v", err)
 	}
@@ -181,9 +197,85 @@ func TestCloneUniverseIdempotent(t *testing.T) {
 	}
 }
 
+func TestCloneUniverseAssignsInitiatingOwnerAndScopesSharedSession(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "021")
+	if !testutil.CheckAGE(t, pool) {
+		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
+	}
+	ctx := context.Background()
+
+	universeRepo := repositories.NewUniverseRepo(pool)
+	svc := NewDemoService(pool, universeRepo, repositories.NewGraphRepo(pool))
+	ownerA := svcCreateTestUser(t, ctx, pool)
+	ownerB := svcCreateTestUser(t, ctx, pool)
+	ownerC := svcCreateTestUser(t, ctx, pool)
+	sessionID := uuid.NewString()
+
+	cloneAID, err := svc.CloneUniverse(ctx, ownerA.ID, sessionID)
+	if err != nil {
+		t.Fatalf("clone for owner A: %v", err)
+	}
+	cloneA, err := universeRepo.FindByID(ctx, uuid.MustParse(cloneAID))
+	if err != nil {
+		t.Fatalf("find clone A: %v", err)
+	}
+	if cloneA.UserID != ownerA.ID {
+		t.Fatalf("clone A owner = %s, want %s", cloneA.UserID, ownerA.ID)
+	}
+
+	sameCloneAID, err := svc.CloneUniverse(ctx, ownerA.ID, sessionID)
+	if err != nil {
+		t.Fatalf("repeat clone for owner A: %v", err)
+	}
+	if sameCloneAID != cloneAID {
+		t.Fatalf("owner A clone = %s, want idempotent %s", sameCloneAID, cloneAID)
+	}
+
+	cloneBID, err := svc.CloneUniverse(ctx, ownerB.ID, sessionID)
+	if err != nil {
+		t.Fatalf("clone for owner B: %v", err)
+	}
+	if cloneBID == cloneAID {
+		t.Fatal("users sharing a browser session ID must not share a demo universe")
+	}
+	cloneB, err := universeRepo.FindByID(ctx, uuid.MustParse(cloneBID))
+	if err != nil {
+		t.Fatalf("find clone B: %v", err)
+	}
+	if cloneB.UserID != ownerB.ID {
+		t.Fatalf("clone B owner = %s, want %s", cloneB.UserID, ownerB.ID)
+	}
+
+	if _, err := svc.ResetUniverse(ctx, ownerC.ID, sessionID); !errors.Is(err, ErrDemoUniverseNotFound) {
+		t.Fatalf("foreign reset error = %v, want ErrDemoUniverseNotFound", err)
+	}
+	if _, err := universeRepo.FindByID(ctx, uuid.MustParse(cloneAID)); err != nil {
+		t.Fatalf("foreign reset removed clone A: %v", err)
+	}
+	if _, err := universeRepo.FindByID(ctx, uuid.MustParse(cloneBID)); err != nil {
+		t.Fatalf("foreign reset removed clone B: %v", err)
+	}
+
+	resetAID, err := svc.ResetUniverse(ctx, ownerA.ID, sessionID)
+	if err != nil {
+		t.Fatalf("reset owner A: %v", err)
+	}
+	resetA, err := universeRepo.FindByID(ctx, uuid.MustParse(resetAID))
+	if err != nil {
+		t.Fatalf("find reset clone A: %v", err)
+	}
+	if resetA.UserID != ownerA.ID {
+		t.Fatalf("reset clone A owner = %s, want %s", resetA.UserID, ownerA.ID)
+	}
+	if _, err := universeRepo.FindByID(ctx, uuid.MustParse(cloneBID)); err != nil {
+		t.Fatalf("owner A reset removed clone B: %v", err)
+	}
+}
+
 func TestCloneUniverseUUIDRemapNoOrphans(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "014")
+	testutil.RunMigrationsUpTo(t, pool, "021")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
@@ -193,7 +285,7 @@ func TestCloneUniverseUUIDRemapNoOrphans(t *testing.T) {
 	graphRepo := repositories.NewGraphRepo(pool)
 	svc := NewDemoService(pool, universeRepo, graphRepo)
 
-	newID, err := svc.CloneUniverse(ctx, uuid.NewString())
+	newID, err := svc.CloneUniverse(ctx, demoTemplateUserID, uuid.NewString())
 	if err != nil {
 		t.Fatalf("CloneUniverse: %v", err)
 	}
@@ -245,7 +337,7 @@ func TestCloneUniverseUUIDRemapNoOrphans(t *testing.T) {
 
 func TestCloneUniverseEmbeddingCopy(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "014")
+	testutil.RunMigrationsUpTo(t, pool, "021")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
@@ -255,7 +347,7 @@ func TestCloneUniverseEmbeddingCopy(t *testing.T) {
 	graphRepo := repositories.NewGraphRepo(pool)
 	svc := NewDemoService(pool, universeRepo, graphRepo)
 
-	newID, err := svc.CloneUniverse(ctx, uuid.NewString())
+	newID, err := svc.CloneUniverse(ctx, demoTemplateUserID, uuid.NewString())
 	if err != nil {
 		t.Fatalf("CloneUniverse: %v", err)
 	}
@@ -304,7 +396,7 @@ func TestCloneUniverseEmbeddingCopy(t *testing.T) {
 
 func TestResetUniverse(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "014")
+	testutil.RunMigrationsUpTo(t, pool, "021")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
@@ -317,7 +409,7 @@ func TestResetUniverse(t *testing.T) {
 	sessionID := uuid.NewString()
 
 	// Clone
-	firstID, err := svc.CloneUniverse(ctx, sessionID)
+	firstID, err := svc.CloneUniverse(ctx, demoTemplateUserID, sessionID)
 	if err != nil {
 		t.Fatalf("first CloneUniverse: %v", err)
 	}
@@ -329,7 +421,7 @@ func TestResetUniverse(t *testing.T) {
 	}
 
 	// Reset
-	resetID, err := svc.ResetUniverse(ctx, sessionID)
+	resetID, err := svc.ResetUniverse(ctx, demoTemplateUserID, sessionID)
 	if err != nil {
 		t.Fatalf("ResetUniverse: %v", err)
 	}
@@ -361,9 +453,86 @@ func TestResetUniverse(t *testing.T) {
 	}
 }
 
+func TestResetUniversePreservesPriorCloneOnReplacementFailureAndCleansOldGraph(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "021")
+	if !testutil.CheckAGE(t, pool) {
+		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
+	}
+	ctx := context.Background()
+
+	universeRepo := repositories.NewUniverseRepo(pool)
+	graphRepo := repositories.NewGraphRepo(pool)
+	svc := NewDemoService(pool, universeRepo, graphRepo)
+	sessionID := uuid.NewString()
+
+	firstID, err := svc.CloneUniverse(ctx, demoTemplateUserID, sessionID)
+	if err != nil {
+		t.Fatalf("initial CloneUniverse: %v", err)
+	}
+	oldGraphName := "universe_" + firstID
+	if _, _, err := graphRepo.FullQuery(ctx, oldGraphName); err != nil {
+		t.Fatalf("query initial clone graph: %v", err)
+	}
+
+	var templateEntityID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM entities WHERE universe_id = $1 LIMIT 1`, templateUniverseID).Scan(&templateEntityID); err != nil {
+		t.Fatalf("select template entity: %v", err)
+	}
+	// The taxonomy migration deliberately prevents invalid labels in normal
+	// application code. Drop it in this isolated test only to exercise the
+	// defensive graph-clone failure path with malformed legacy data.
+	if _, err := pool.Exec(ctx, `ALTER TABLE entities DROP CONSTRAINT entities_type_check`); err != nil {
+		t.Fatalf("drop entity type constraint for failure fixture: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE entities SET type = 'invalid-demo-label' WHERE id = $1`, templateEntityID); err != nil {
+		t.Fatalf("make template graph clone fail: %v", err)
+	}
+
+	if _, err := svc.ResetUniverse(ctx, demoTemplateUserID, sessionID); err == nil {
+		t.Fatal("ResetUniverse succeeded despite invalid template graph label")
+	}
+
+	current, err := universeRepo.FindByUserAndSessionID(ctx, demoTemplateUserID, sessionID)
+	if err != nil {
+		t.Fatalf("find prior clone after failed reset: %v", err)
+	}
+	if current == nil || current.ID.String() != firstID {
+		t.Fatalf("failed reset replaced prior clone: %#v, want %s", current, firstID)
+	}
+	if _, _, err := graphRepo.FullQuery(ctx, oldGraphName); err != nil {
+		t.Fatalf("failed reset removed prior graph: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE entities SET type = 'character' WHERE id = $1`, templateEntityID); err != nil {
+		t.Fatalf("repair template graph label: %v", err)
+	}
+	resetID, err := svc.ResetUniverse(ctx, demoTemplateUserID, sessionID)
+	if err != nil {
+		t.Fatalf("retry ResetUniverse: %v", err)
+	}
+	if resetID == firstID {
+		t.Fatalf("reset ID = %s, want a replacement clone", resetID)
+	}
+
+	current, err = universeRepo.FindByUserAndSessionID(ctx, demoTemplateUserID, sessionID)
+	if err != nil {
+		t.Fatalf("find replacement clone: %v", err)
+	}
+	if current == nil || current.ID.String() != resetID {
+		t.Fatalf("session now resolves to %#v, want %s", current, resetID)
+	}
+	if _, _, err := graphRepo.FullQuery(ctx, oldGraphName); err == nil {
+		t.Fatal("obsolete demo graph still exists after a successful reset")
+	}
+	if _, _, err := graphRepo.FullQuery(ctx, "universe_"+resetID); err != nil {
+		t.Fatalf("replacement graph missing after reset: %v", err)
+	}
+}
+
 func TestCloneGraph(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "014")
+	testutil.RunMigrationsUpTo(t, pool, "021")
 	if !testutil.CheckAGE(t, pool) {
 		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
 	}
@@ -373,7 +542,7 @@ func TestCloneGraph(t *testing.T) {
 	graphRepo := repositories.NewGraphRepo(pool)
 	svc := NewDemoService(pool, universeRepo, graphRepo)
 
-	newID, err := svc.CloneUniverse(ctx, uuid.NewString())
+	newID, err := svc.CloneUniverse(ctx, demoTemplateUserID, uuid.NewString())
 	if err != nil {
 		t.Fatalf("CloneUniverse: %v", err)
 	}

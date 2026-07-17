@@ -38,11 +38,10 @@ describe('PlotHoleList', () => {
     expect(screen.getByText(/never followed up on/)).toBeInTheDocument()
   })
 
-  it('shows "Go to chapter →" only when a first-mentioned chapter exists, and navigates', () => {
+  it('shows an accessible Go to chapter action only when a first-mentioned chapter exists', () => {
     render(<PlotHoleList plotHoles={plotHoles} universeId="uni-1" />)
-    const links = screen.getAllByText(/Go to chapter/)
-    expect(links.length).toBe(1)
-    fireEvent.click(links[0])
+    const action = screen.getByRole('button', { name: 'Go to chapter' })
+    fireEvent.click(action)
     expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-1/editor/ch-4')
   })
 })

@@ -3,12 +3,11 @@ package handlers
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
-	"github.com/quill/backend/internal/middleware"
-	"github.com/quill/backend/internal/models"
 	"github.com/quill/backend/internal/repositories"
 	"github.com/quill/backend/internal/services"
 )
@@ -17,8 +16,13 @@ import (
 // pontail: tiny interface for testability — no full repo abstraction needed.
 type graphQuerier interface {
 	FullQuery(ctx context.Context, graphName string) ([]repositories.GraphNode, []repositories.GraphEdge, error)
-	NHopTraversal(ctx context.Context, graphName string, startNodeID string, hops int) ([]repositories.GraphNode, []repositories.GraphEdge, error)
+	BoundedNHopTraversal(ctx context.Context, graphName string, startNodeID string, hops int) (repositories.GraphTraversalResult, error)
 }
+
+// graphTraversalTimeout bounds an AGE request without setting mutable session
+// statement_timeout on a pooled connection. pgx propagates context cancellation
+// to PostgreSQL without leaving a timeout value behind for the next request.
+const graphTraversalTimeout = 2 * time.Second
 
 // queryEmbedder is the subset of *services.QwenService used to embed a
 // recall-explain query string. Local interface (mirrors the graphQuerier
@@ -36,10 +40,6 @@ type Decayer interface {
 
 type writerMemoryDecayer interface {
 	DecayForUniverse(ctx context.Context, universeID uuid.UUID) error
-}
-
-type universeOwnerResolver interface {
-	FindByID(ctx context.Context, id uuid.UUID) (*models.Universe, error)
 }
 
 // GraphHandler serves graph-related REST endpoints.
@@ -87,39 +87,6 @@ func (h *GraphHandler) SetUniverseOwnerRepo(repo universeOwnerResolver) {
 	h.ownerRepo = repo
 }
 
-func (h *GraphHandler) authorizeUniverse(c *fiber.Ctx, universeID uuid.UUID) error {
-	if h.ownerRepo == nil {
-		return nil
-	}
-	userID := middleware.GetUserID(c)
-	if userID == uuid.Nil {
-		return fiber.ErrUnauthorized
-	}
-	universe, err := h.ownerRepo.FindByID(c.Context(), universeID)
-	if err != nil {
-		return fiber.ErrNotFound
-	}
-	if universe.UserID != userID {
-		return fiber.ErrForbidden
-	}
-	return nil
-}
-
-func graphOwnershipError(c *fiber.Ctx, err error) error {
-	status := fiber.StatusInternalServerError
-	code := "INTERNAL_ERROR"
-	message := err.Error()
-	switch err {
-	case fiber.ErrUnauthorized:
-		status, code, message = fiber.StatusUnauthorized, "UNAUTHORIZED", "authentication required"
-	case fiber.ErrForbidden:
-		status, code, message = fiber.StatusForbidden, "FORBIDDEN", "universe access denied"
-	case fiber.ErrNotFound:
-		status, code, message = fiber.StatusNotFound, "NOT_FOUND", "universe not found"
-	}
-	return c.Status(status).JSON(fiber.Map{"error": fiber.Map{"code": code, "message": message}})
-}
-
 // FullGraph returns all nodes and edges for a universe's graph.
 // GET /api/v1/universes/:universe_id/graph
 func (h *GraphHandler) FullGraph(c *fiber.Ctx) error {
@@ -129,8 +96,8 @@ func (h *GraphHandler) FullGraph(c *fiber.Ctx) error {
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe_id"},
 		})
 	}
-	if err := h.authorizeUniverse(c, universeID); err != nil {
-		return graphOwnershipError(c, err)
+	if err := authorizeUniverse(c, h.ownerRepo, universeID); err != nil {
+		return universeAccessError(c, err)
 	}
 
 	graphName := "universe_" + universeID.String()
@@ -177,44 +144,27 @@ func (h *GraphHandler) Neighbors(c *fiber.Ctx) error {
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe_id"},
 		})
 	}
-	if err := h.authorizeUniverse(c, universeID); err != nil {
-		return graphOwnershipError(c, err)
+	if err := authorizeUniverse(c, h.ownerRepo, universeID); err != nil {
+		return universeAccessError(c, err)
 	}
 
-	hops := c.QueryInt("hops", 1)
-	if hops < 1 {
-		hops = 1
-	}
-	if hops > 5 {
-		hops = 5 // ponytail: cap at 5 to avoid deep traversal
-	}
+	hops := repositories.NormalizeGraphTraversalHops(c.QueryInt("hops", 1))
 
 	graphName := "universe_" + universeID.String()
-	nodes, edges, err := h.graphRepo.NHopTraversal(c.Context(), graphName, entityID.String(), hops)
+	ctx, cancel := context.WithTimeout(c.UserContext(), graphTraversalTimeout)
+	defer cancel()
+	traversal, err := h.graphRepo.BoundedNHopTraversal(ctx, graphName, entityID.String(), hops)
 	if err != nil {
 		// ponytail: AGE throws "graph does not exist" for new universes; return empty 200
 		if strings.Contains(err.Error(), "does not exist") {
-			return c.JSON(fiber.Map{
-				"nodes": []repositories.GraphNode{},
-				"edges": []repositories.GraphEdge{},
-			})
+			return c.JSON(repositories.NewGraphTraversalResult(hops))
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fiber.Map{"code": "INTERNAL_ERROR", "message": err.Error()},
 		})
 	}
 
-	if nodes == nil {
-		nodes = []repositories.GraphNode{}
-	}
-	if edges == nil {
-		edges = []repositories.GraphEdge{}
-	}
-
-	return c.JSON(fiber.Map{
-		"nodes": nodes,
-		"edges": edges,
-	})
+	return c.JSON(traversal)
 }
 
 // Recall returns contextually-relevant entities via the memory service.
@@ -244,8 +194,8 @@ func (h *GraphHandler) Recall(c *fiber.Ctx) error {
 	if req.K > 20 {
 		req.K = 20
 	}
-	if err := h.authorizeUniverse(c, universeID); err != nil {
-		return graphOwnershipError(c, err)
+	if err := authorizeUniverse(c, h.ownerRepo, universeID); err != nil {
+		return universeAccessError(c, err)
 	}
 
 	// Preserve the query through the memory pipeline. Non-empty queries use the
@@ -304,8 +254,8 @@ func (h *GraphHandler) RecallExplain(c *fiber.Ctx) error {
 	if req.K > 20 {
 		req.K = 20
 	}
-	if err := h.authorizeUniverse(c, universeID); err != nil {
-		return graphOwnershipError(c, err)
+	if err := authorizeUniverse(c, h.ownerRepo, universeID); err != nil {
+		return universeAccessError(c, err)
 	}
 
 	// Embed the query string before passing to RecallExplain (mirror
@@ -341,8 +291,8 @@ func (h *GraphHandler) MemoryStatus(c *fiber.Ctx) error {
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe ID"},
 		})
 	}
-	if err := h.authorizeUniverse(c, universeID); err != nil {
-		return graphOwnershipError(c, err)
+	if err := authorizeUniverse(c, h.ownerRepo, universeID); err != nil {
+		return universeAccessError(c, err)
 	}
 
 	status, err := h.memorySvc.MemoryStatus(c.Context(), universeID)
@@ -366,8 +316,8 @@ func (h *GraphHandler) RunDecay(c *fiber.Ctx) error {
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe ID"},
 		})
 	}
-	if err := h.authorizeUniverse(c, universeID); err != nil {
-		return graphOwnershipError(c, err)
+	if err := authorizeUniverse(c, h.ownerRepo, universeID); err != nil {
+		return universeAccessError(c, err)
 	}
 
 	if h.decayer == nil {

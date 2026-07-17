@@ -43,6 +43,7 @@ interface GraphPing {
 
 interface IngestionProgress {
   job_id?: string
+  universe_id?: string
   status?: string
   chapters_processed?: number
   total_chapters?: number
@@ -73,6 +74,7 @@ export interface SubmissionLifecycle {
   submissionId: string
   paragraphRef: string
   chapterId?: string
+  universeId?: string
   phase: SubmissionPhase
   reason?: string
   updatedAt: number
@@ -93,6 +95,7 @@ interface WSState {
   status: WSStatus
   lastError: string | null
   reconnectAttempt: number
+  activeUniverseId: string | null
   analysisResults: AnalysisResult[]
   contradictions: Contradiction[]
   discoveredEntities: DiscoveredEntity[]
@@ -105,6 +108,7 @@ interface WSState {
   craftReviews: CraftReviewResult[]
   liveCandidates: EntityCandidateDTO[]
   removeLiveCandidate: (candidateId: string) => void
+  setUniverseScope: (universeId: string | null) => void
   connect: (token: string) => void
   disconnect: () => void
   send: (msg: WSMessage) => void
@@ -125,6 +129,7 @@ export const useWSStore = create<WSState>((set, get) => {
       submissionId,
       paragraphRef,
       chapterId: typeof payload.chapter_id === 'string' ? payload.chapter_id : undefined,
+      universeId: typeof payload.universe_id === 'string' ? payload.universe_id : undefined,
       phase: 'submitted',
       updatedAt: Date.now(),
     }
@@ -134,18 +139,34 @@ export const useWSStore = create<WSState>((set, get) => {
     const current = submissionFromPayload(payload)
     if (!current) return
     const existing = get().submissions[current.submissionId]
+    const universeId = current.universeId ?? existing?.universeId
     set({
       submissions: {
         ...get().submissions,
         [current.submissionId]: {
           ...existing,
           ...current,
+          ...(universeId ? { universeId } : {}),
           phase,
           updatedAt: Date.now(),
           ...(reason ? { reason } : {}),
         },
       },
     })
+  }
+
+  function universeIdForPayload(payload: Record<string, unknown>): string | undefined {
+    const universeId = payload.universe_id
+    return typeof universeId === 'string' && universeId.length > 0 ? universeId : undefined
+  }
+
+  function isInActiveUniverseScope(payload: Record<string, unknown>): boolean {
+    const activeUniverseId = get().activeUniverseId
+    const messageUniverseId = universeIdForPayload(payload)
+    // Scoped state must fail closed. A reconnect can deliver events created
+    // before the current page mounted, so a local submission lookup or a
+    // nested resource ID is not enough to establish the server's universe.
+    return activeUniverseId !== null && messageUniverseId === activeUniverseId
   }
 
   function queueOutbound(msg: WSMessage) {
@@ -191,13 +212,16 @@ export const useWSStore = create<WSState>((set, get) => {
         set({ lastError: (payload.message as string) || (payload.error as string) || 'Unknown WS error' })
         break
       case 'analysis_result':
-        set({ analysisResults: [...get().analysisResults, payload as AnalysisResult].slice(-200) })
+        if (!isInActiveUniverseScope(payload)) break
         updateSubmission(payload, 'done')
+        set({ analysisResults: [...get().analysisResults, payload as AnalysisResult].slice(-200) })
         break
       case 'analysis_failed':
+        if (!isInActiveUniverseScope(payload)) break
         updateSubmission(payload, 'failed', (payload.reason as string) || 'Analysis failed')
         break
       case 'contradiction_alert':
+        if (!isInActiveUniverseScope(payload)) break
         set({
           contradictions: [
             ...get().contradictions,
@@ -206,6 +230,7 @@ export const useWSStore = create<WSState>((set, get) => {
         })
         break
       case 'entity_discovered':
+        if (!isInActiveUniverseScope(payload)) break
         set({ discoveredEntities: [...get().discoveredEntities, payload as DiscoveredEntity].slice(-200) })
         {
           const entity = (payload.entity as Record<string, unknown> | undefined) || payload
@@ -236,9 +261,11 @@ export const useWSStore = create<WSState>((set, get) => {
         }
         break
       case 'contextual_recall':
+        if (!isInActiveUniverseScope(payload)) break
         set({ recallItems: [...get().recallItems, payload as RecallItem].slice(-200) })
         break
       case 'graph_updated':
+        if (!isInActiveUniverseScope(payload)) break
         set({ graphPings: [...get().graphPings, payload as GraphPing].slice(-200) })
         break
       case 'analysis_progress': {
@@ -249,6 +276,8 @@ export const useWSStore = create<WSState>((set, get) => {
           plot_hole_count?: number
           budget?: BudgetReport
         }
+        if (!isInActiveUniverseScope(payload)) break
+        updateSubmission(payload, 'analyzing')
         set({
           pipeline: {
             stage: p.stage ?? '',
@@ -258,10 +287,10 @@ export const useWSStore = create<WSState>((set, get) => {
           },
           ...(p.budget ? { budget: p.budget } : {}),
         })
-        updateSubmission(payload, 'analyzing')
         break
       }
       case 'ingestion_progress': {
+        if (!isInActiveUniverseScope(payload)) break
         const progress = payload as IngestionProgress
         if (progress.job_id) {
           set({ ingestionProgress: { ...get().ingestionProgress, [progress.job_id]: progress } })
@@ -269,6 +298,7 @@ export const useWSStore = create<WSState>((set, get) => {
         break
       }
       case 'craft_review_result':
+        if (!isInActiveUniverseScope(payload)) break
         set({ craftReviews: [...get().craftReviews, payload as unknown as CraftReviewResult].slice(-20) })
         break
       default:
@@ -351,6 +381,7 @@ export const useWSStore = create<WSState>((set, get) => {
     status: 'idle',
     lastError: null,
     reconnectAttempt: 0,
+    activeUniverseId: null,
     analysisResults: [],
     contradictions: [],
     discoveredEntities: [],
@@ -365,6 +396,26 @@ export const useWSStore = create<WSState>((set, get) => {
 
     removeLiveCandidate: (candidateId: string) => {
       set({ liveCandidates: get().liveCandidates.filter((candidate) => candidate.entity_id !== candidateId) })
+    },
+
+    setUniverseScope: (universeId: string | null) => {
+      if (get().activeUniverseId === universeId) return
+      // Retain submission lifecycle data for editor retry feedback when a
+      // writer returns to a previous universe. Display-only slices are reset
+      // so the persistent shell cannot report stale analysis or candidates.
+      set({
+        activeUniverseId: universeId,
+        analysisResults: [],
+        contradictions: [],
+        discoveredEntities: [],
+        recallItems: [],
+        graphPings: [],
+        ingestionProgress: {},
+        pipeline: null,
+        budget: null,
+        craftReviews: [],
+        liveCandidates: [],
+      })
     },
 
     connect: (token: string) => {

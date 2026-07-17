@@ -1,190 +1,135 @@
 # Quill Design System
 
-## Core Concept
-"Writing a universe as if it were in an ancient manuscript, powered by modern intelligence."
+> **Sprint 7 status:** Quiet Studio is the active design standard for new and refactored UI. Adoption and product verification are still in progress; this document is a decision guide, not evidence that every legacy route has migrated.
 
-This UI is not a typical application. It is a narrative space — manuscript-modern: the warmth of a
-hand-bound journal rendered with a teal/gold accent system and clean, contemporary typography.
+## Outcome
 
----
+Quill is an English-language, writer-first SPA. The Quiet Studio makes the manuscript and the next author decision easy to see while revealing real memory intelligence only when it helps the writer. It should feel calm and editorial, never like a collection of engineering dashboards.
 
-## Color System
+## Quick reference
 
-Backgrounds / surfaces:
-- App canvas `--bg-app` `#eae1cf` · Sidebar `--bg-sidebar` `#efe7d3` · Header `--bg-header` `#f2ecdd`
-- Card `--bg-card` `#f6f1e6` · Input `--bg-input` `#f2ecdd` · Editor rail `--bg-rail` `#f2ecdd`
-- Graph canvas `--bg-graph` `#e6ddc9` · Sunken surface (chips, property tiles) `--surface-sunken` `#eae1cf`
+| Concern | Standard |
+|---|---|
+| Theme | One polished light interface for Sprint 7; no dark-mode expansion in this scope. |
+| Type | Newsreader for manuscript reading and editorial headings; Spline Sans for controls and data. |
+| Color | Semantic paper, ink, pine-teal, amber, coral, and violet tokens—not page-specific color literals. |
+| Icons | Lucide icons for interactive UI chrome; text labels remain available where meaning would otherwise be unclear. |
+| Feedback | Every async action has an honest status, direct recovery guidance, and a retry path when retry is safe. |
+| Motion | CSS only, subtle by default, and reduced or removed for `prefers-reduced-motion`. |
+| Accessibility | Skip link, visible keyboard focus, semantic controls, WCAG AA contrast, and live status announcements. |
+| Story map | Cytoscape with fCoSE is the intended relationship-map runtime; React Flow is not the Sprint 7 target. |
 
-Ink / text:
-- Primary `--ink` `#2b2620` · Editor body `--ink-body` `#332e26` · Soft `--ink-soft` `#4a4238`
-- Secondary `--muted` `#6f6656` · Labels/meta `--muted-2` `#6b6455` · Faint icons `--muted-3` `#b7ad96`
+## Information architecture
 
-Accent / brand:
-- Teal `--teal` `#2f5d54` (primary accent, buttons, active nav)
-- Teal deep `--teal-deep` `#234b43` (hero/gradient dark, sidebar hero)
-- Gold `--gold` `#dda94a` (highlight, CTA on dark, avatar; nudged from `#d9a441` in the Phase 5 contrast pass to clear WCAG AA on `--teal-deep`)
-- Gold-ink `--gold-ink` `#8a6a1f` (gold accent text/borders on light tan surfaces — plain `--gold` fails AA there)
-- Text-on-teal `--parchment-hi` `#f4ecdd`, `--teal-tint-on-dark` `#c2d1cb` / `--teal-tint-on-dark-2` `#b6c8c1`
+The primary navigation has five destinations. Legacy deep links may redirect into these destinations, but the navigation itself should not expose an internal taxonomy of peer screens.
 
-Opacity / border helpers (codified so components stop hardcoding `rgba(43,38,32,.X)`):
-- `--line` `rgba(43,38,32,.1)` hairline borders/dividers
-- `--line-2` `rgba(43,38,32,.07)` table row divider
-- `--line-strong` `rgba(43,38,32,.14)` input borders
-- `--hover` `rgba(43,38,32,.05)` nav hover
-- `--teal-soft` `rgba(47,93,84,.10)` / `--teal-soft-12` `rgba(47,93,84,.12)` (nav active bg, chips)
-- `--gold-soft` `rgba(181,132,47,.12)`
+| Destination | Writer job | Scope |
+|---|---|---|
+| **Home** | Choose a universe, continue work, start a demo, or create a universe. | Library and universe entry points. |
+| **Write** | Draft, manage chapters, import material, and receive live analysis. | The uninterrupted manuscript workflow. |
+| **Explore** | Understand the story world and its relationships. | Entities, relationship map, and timeline. |
+| **Memory** | See what Quill recalls, why, and what it intentionally deprioritizes. | Recall evidence and memory lifecycle. |
+| **Review** | Decide what to do about author-facing intelligence. | Candidates, contradictions, plot holes, and craft notes. |
 
-Semantic:
-- Danger `--danger` `#954827` (contradiction text/labels; darkened from `#a8542f` in the Phase 5 contrast pass — original only cleared ~4:1 on tan backgrounds), `--danger-deep` `#c0533a` (graph conflict edge, decorative — unchanged)
-- `--danger-bg` `#f7ece3`, `--danger-border` `rgba(168,84,47,.25)`
-- Warning `--warning` `#7d5a1c` (in-analysis, medium severity, ingestion progress; darkened from `#b5842f` — original only cleared ~2.5-3:1 on tan backgrounds)
-- Success `--success` `#356b47` (analyzed/saved text; darkened from `#3f7a4f` — original only cleared ~3.7-4.3:1 on tan backgrounds) / `--success-2` `#5a7a52` (decorative — unchanged)
-- Conflict dash `--conflict-dash` `#d98b63` (animated dashed contradiction line)
+## Foundations
 
-Knowledge-graph node types (6 backend entity types):
-- Character `--node-character` `#2f5d54` · Place `--node-place` `#5a7a52` · Event `--node-event` `#b5842f`
-- Faction `--node-faction` `#6f6656` · World Rule `--node-worldrule` `#4e8073` · Plot Arc `--node-plotarc` `#a8542f`
+### Typography
+
+- **Newsreader** carries manuscript text, editorial headings, and reading-oriented numerals.
+- **Spline Sans** carries controls, labels, navigation, metadata, and data-dense surfaces.
+- Use type hierarchy and whitespace before adding decoration. The manuscript remains the most readable element on a writing screen.
+
+### Semantic color system
+
+All interface colors are defined as semantic tokens in `frontend/src/index.css`; components consume the role, never a hard-coded hex value.
+
+| Token family | Meaning | Typical use |
+|---|---|---|
+| Paper | Warm light canvas and elevated surfaces. | App background, cards, inputs, manuscript framing. |
+| Ink | High-legibility foreground and structural borders. | Body text, headings, dividers, disabled hierarchy. |
+| Pine-teal | Active intelligence and primary action. | Primary buttons, active navigation, connected state. |
+| Amber | Attention that needs monitoring, not alarm. | Progress, queued or running analysis, informational emphasis. |
+| Coral | Risk, failure, conflict, or destructive action. | Errors, contradictions, failed requests, recovery prompts. |
+| Violet | Memory-specific meaning. | Recall provenance, memory lifecycle, and memory-only emphasis. |
 
 Rules:
-- All colors live as `:root` tokens in `index.css`; components consume `var(--token)` only — never
-  hardcode hex.
-- Opacity helpers (`--line*`, `--hover`, `--*-soft`) replace ad-hoc `rgba()` literals.
 
-### Contrast validation
+- Use semantic roles so color remains meaningful across screens.
+- Build depth with paper surfaces, borders, whitespace, and type hierarchy—not ornamental gradients or decorative data effects.
+- Do not use color as the sole state indicator; pair it with text, shape, or an accessible status label.
+- Keep contrast at WCAG AA or better for the foreground/background pair actually rendered.
 
-`--muted-2` is checked against every background it's actually painted on as text color
-(`frontend/src/lib/contrast.ts`): `#736c5b` (an earlier candidate, itself darkened from `#8a7f6c`
-which only reached ~3.5:1 on `--bg-card`) cleared 4.5:1 on `--bg-card` (~4.63:1) but failed on
-`--bg-app` (~4.02:1), `--bg-input`/`--bg-header`/`--bg-rail` (~4.43:1), and `--bg-sidebar` (~4.23:1).
-The shipped `#6b6455` clears 4.5:1 against the worst case, `--bg-app` (~4.52:1), and therefore against
-every other background too. A full per-screen AA pass across every other color pairing is deferred to
-the final migration gate.
+### Surfaces and layout
 
----
+- Keep the chrome light, quiet, and visually subordinate to the manuscript.
+- Prefer contained paper surfaces with deliberate spacing over dense panels and permanent sidebars.
+- The top app bar establishes global orientation. Contextual controls, such as chapter navigation, belong inside the relevant destination and can collapse when they compete with writing.
+- Keep Home cards focused: one clear primary action and no more than two secondary metrics per universe card.
 
-## Typography
+## Component and interaction standards
 
-- Titles, editor body, numerals: Newsreader (`--serif`) — serif display face, opsz 6..72, weights 400/500/600 + italic 400/500
-- Body / UI: Spline Sans (`--sans`) — weights 400/500/600
-- Labels, microcopy, uppercase kickers: Spline Sans Mono (`--mono`) — weights 400/500
+### Icons and controls
 
-Loaded via Google Fonts `<link>` in `index.html` (Newsreader + Spline Sans + Spline Sans Mono).
+- Use `lucide-react` for navigation, controls, status affordances, and compact actions.
+- Do not use Unicode glyphs as the interactive icon system. Existing glyphs are legacy content, not a model for new work.
+- An icon-only control needs an accessible name, a discoverable tooltip where useful, and a keyboard-reachable focus state.
+- Use CSS Modules and focused primitives; do not introduce a visual component framework or Tailwind for this sprint.
 
-Cursor:
-- Editor caret blinks via the `qblink` keyframe instead of a static line.
+### Feedback is a product contract
 
----
+Each request, save, analysis, recall, import, reset, or clone action communicates one of these states: `queued`, `running`, `completed`, `failed`, or `offline`.
 
-## Surfaces
+- Show a plain-language status close to the affected work and announce important changes through an accessible live region.
+- Use non-blocking feedback for transient confirmation; preserve persistent header status for autosave, WebSocket/Qwen connectivity, active analysis, and unresolved failures.
+- Provide loading, empty, success, and failure states. Do not hide errors behind silent catches, browser alerts, or unexplained optimistic rollbacks.
+- Offer retry only when it is safe; explain what will be retried and what the writer can do if it fails again.
 
-- Warm tan/cream cards on a teal-accented ground — manuscript feel without heavy texture.
-- Sidebar/header use the lighter `--bg-sidebar` / `--bg-header` surfaces; hero/CTA blocks use
-  `--teal-deep` for contrast.
+### Genre selection
 
----
+`GenreTagPicker` is the shared pattern for universe create and edit flows.
 
-## Layout
+- It supports search, checkable tags, selected-tag summary, removal, and full keyboard operation.
+- The closed vocabulary remains server-owned.
+- Selection is optional: a universe may have **zero or more** genre tags. Never force a default genre merely to satisfy the UI.
 
-- Editorial spacing: page padding `26–28px 30–34px`, card padding `18–24px 20–26px`, standard gaps `12–20px`.
-- Radius scale: `--r-sm` 7px, `--r-md` 9px, `--r-lg` 12px, `--r-xl` 14px, `--r-2xl` 16px, `--r-pill` 20px, `--r-round` 50%.
-- Font sizes in use: 9.5–10px (mono labels), 11.5–13.5px (body/meta), 14–18px (input/editor),
-  16–23px (card titles), 28–34px (page/hero H1/H2), 30px (stat numerals).
+### Motion
 
----
+- Use lightweight CSS transitions and keyframes only when they clarify status or preserve orientation.
+- Keep motion slow, subtle, and interruptible. Do not use scroll-linked choreography or decorative animated data effects.
+- Under `prefers-reduced-motion`, remove nonessential motion and avoid animated state changes that obscure feedback.
 
-## Components
+## Accessibility baseline
 
-Cards:
-- `--bg-card` fill, `--line` border, `--r-lg` radius — reads as a manuscript page fragment.
+- Provide a skip link that moves keyboard focus to the current page’s main content.
+- Use a consistent `:focus-visible` treatment across links, buttons, menus, inputs, chips, and custom graph controls.
+- Preserve native semantics whenever possible. Custom controls must have equivalent keyboard behavior, labels, and state exposure.
+- Use `aria-live` for meaningful asynchronous status changes without stealing focus.
+- Ensure responsive layouts preserve reading order and keyboard order at judge-recording and mobile widths.
 
-Buttons:
-- `button.primary`: teal-filled (`--teal`), text `--parchment-hi`, `--r-md` radius, `--teal-deep` on hover.
-- Secondary/outline buttons use `--line-strong` borders and `--ink` text.
+## Relationship map and data visualization
 
-Inputs:
-- Filled, rounded style: `--bg-input` background, `1px solid --line-strong` border, `--r-md` radius,
-  `12px 14px` padding — replaces the previous underline-only input style. Focus ring switches the
-  border to `--teal`.
+### Story relationship map
 
-Progress:
-- Warm-toned bars/dots using `--warning` (in progress) → `--success` (done), not ink strokes.
+The map is a relationship tool, not an editable architecture diagram.
 
----
+- The intended runtime is Cytoscape with fCoSE, loaded lazily so it does not delay Home or Write.
+- Start with the selected entity’s focused two-hop neighborhood rather than an all-universe graph.
+- Render quiet, unlabeled edges and readable entity cards. Relationship meaning appears after selection in a prose inspector with evidence, source chapter, connected entities, and conflicts.
+- Pair the canvas with entity search, type filters, reset focus, keyboard navigation, and an accessible relationship list that mirrors the visible graph.
 
-## Icon system
+### Other data visuals
 
-Navigation and chrome glyphs are inline Unicode characters (or inline SVG fallback where a glyph
-doesn't render), never a generic icon library dependency. See `Docs/` ADR notes for the full glyph
-map; this keeps the bundle dependency-free and matches the manuscript-modern tone.
+Small memory charts should remain native, lightweight visualizations that use the semantic tokens and expose their data in text. Do not add a general charting library for them. Cytoscape is the narrow relationship-map exception, not a replacement for the rest of the visual system.
 
----
+## Reviewer checklist
 
-## Animations
+- [ ] The page belongs clearly to one of the five primary destinations.
+- [ ] Paper, ink, pine-teal, amber, coral, and violet are used by meaning, not decoration.
+- [ ] Controls use Lucide icons and retain an accessible name and visible focus.
+- [ ] Async states are direct, honest, and recoverable; no silent failure path remains.
+- [ ] The page works with keyboard navigation, skip-link entry, sufficient contrast, and reduced motion.
+- [ ] Any relationship-map work follows the Cytoscape/fCoSE target and retains a non-canvas equivalent.
 
-Lightweight CSS `@keyframes` in `index.css` — no GSAP/ScrollTrigger dependency:
-- `qfloat` — gentle vertical float (hero graph nodes)
-- `qdash` — animated dash-offset (conflict/dashed edges)
-- `qpulse` — opacity pulse (in-progress indicators)
-- `qglow` — soft box-shadow glow (focus/active emphasis)
-- `qblink` — editor caret blink
-- `qspin` — loading spinner rotation
-- `qrise` — fade + rise-in for cards/sections entering view
-- `.q-scroll` — thin, muted-color scrollbar utility for rail/panel overflow
+## Scope and verification
 
-Animations stay slow, subtle, and non-distracting — the previous GSAP + ScrollTrigger scroll-driven
-system is retired in favor of these CSS keyframes; nothing in the current screens requires
-scroll-linked choreography.
-
----
-
-## Illustrations
-
-- Line-art / engraving-style SVGs where illustration is used (e.g., the login/landing hero
-  relationship graph), colored with the teal/gold accent tokens rather than flat modern graphics.
-
----
-
-## Data visualization (Memory Theater)
-
-The Memory Inspector (`/universe/:id/memory`) renders the memory subsystem as charts. Same rule as icons:
-**inline SVG only, no charting library** — hand-drawn `<polyline>`/`<rect>`/`<line>` in the component,
-sized by `viewBox`, colored with palette tokens (never hardcoded hex).
-
-- **Decay timeline** (`DecayTimeline`): a multi-line score-over-time chart. Each entity is one
-  `<polyline>` colored by lifecycle — `active` = `--success-2`, `dormant`/decaying = warm node tokens
-  (`--node-event`/`--node-worldrule`), `archived` = `--muted-3`. The archive threshold is a dashed
-  `--muted-3` horizontal line; crossing points get ▼/▲ markers. Axis/labels use `--mono`.
-- **Fusion explorer** (`FusionExplorer`): the five RRF pipelines as columns, the fused result list, and
-  per-item contribution chips — chips use `--teal`/`--teal-soft` (and `--gold-ink` for emphasis), same
-  sunken-surface + `--r-pill` treatment as elsewhere.
-- **Budget theater** (`BudgetTheater`): token-budget bars (`--r-md`), warm fill for fitted items, muted
-  for dropped — reusing the progress-bar tone (`--success` fitted, `--muted-*` dropped), not new colors.
-
-Charts must read like the rest of the manuscript: warm ground, thin `--line` gridlines/borders, `--mono`
-numerals, subtle motion only (no animated axes). If a chart needs a color that isn't already a palette
-token, that's a signal to reuse an existing one, not to add a hex.
-
-## Emotional Tone
-
-- Calm, creative control, intimate, thoughtful — now paired with a slightly more "product" teal/gold
-  accent so data (entities, contradictions, timeline, memory) reads clearly against the manuscript backdrop.
-
----
-
-## Consistency Rules
-
-Ask:
-1. Does it feel written or generated?
-2. Does it feel physical?
-3. Does it have space?
-4. Could it exist in an ancient book, viewed through a modern lens?
-
-If not, redesign.
-
----
-
-## Summary
-
-An editorial, manuscript-inspired interface — teal/gold/tan palette, Newsreader + Spline Sans
-typography, inline glyph icons, lightweight CSS keyframes — where modern UI disappears behind a
-timeless writing experience.
+This file records the Sprint 7 design decisions. Product completion remains governed by [Sprint 7](Docs/Sprints/SPRINT-7.md), especially Task 7.7’s test, accessibility, build, and judge-demo checks.

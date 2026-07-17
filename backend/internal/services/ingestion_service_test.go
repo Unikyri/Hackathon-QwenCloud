@@ -442,6 +442,9 @@ Frodo learns about the Ring.`
 			if payload["job_id"] == nil {
 				t.Error("progress payload missing job_id")
 			}
+			if payload["universe_id"] != universeID.String() {
+				t.Errorf("progress universe_id = %v, want %s", payload["universe_id"], universeID)
+			}
 		}
 	}
 	if !foundProgress {
@@ -883,11 +886,20 @@ func TestIngestionServiceNilDeps(t *testing.T) {
 // not uuid.Nil (see sdd/fix-ingestion-progress-delivery).
 func TestIngestionProgressDeliveredToUniverseOwner(t *testing.T) {
 	pool := testutil.SetupTestDB(t)
-	testutil.RunMigrationsUpTo(t, pool, "020")
+	testutil.RunMigrationsUpTo(t, pool, "021")
 	ctx := context.Background()
 
 	user := svcCreateTestUser(t, ctx, pool)
-	universe := svcCreateTestUniverse(t, ctx, pool, user.ID)
+	// This regression exercises UniverseRepo.FindByID, whose current contract
+	// requires migration 021's genre_tags schema. Keep the older shared helper
+	// for tests intentionally pinned to pre-021 migrations.
+	universe := models.Universe{ID: uuid.New(), UserID: user.ID, Name: "Ingestion Progress Universe", GenreTags: []string{"fantasy"}}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO universes (id, user_id, name, description, genre_tags)
+		VALUES ($1, $2, $3, $4, $5)
+	`, universe.ID, universe.UserID, universe.Name, "", universe.GenreTags); err != nil {
+		t.Fatalf("create current-schema universe: %v", err)
+	}
 
 	hub := &mockIngestionHub{}
 	svc := &IngestionService{
@@ -922,6 +934,13 @@ func TestIngestionProgressDeliveredToUniverseOwner(t *testing.T) {
 		}
 		if userIDs[i] != universe.UserID {
 			t.Errorf("ingestion_progress message %d userID = %s, want %s", i, userIDs[i], universe.UserID)
+		}
+		var payload models.IngestionProgressPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal ingestion progress: %v", err)
+		}
+		if payload.UniverseID != universe.ID {
+			t.Errorf("ingestion_progress universe_id = %s, want %s", payload.UniverseID, universe.ID)
 		}
 	}
 	if !foundProgress {
@@ -1011,6 +1030,9 @@ func TestRunWorkerParseFailure(t *testing.T) {
 			t.Fatalf("unmarshal progress payload: %v", err)
 		}
 		if payload["job_id"] == jobID.String() && payload["status"] == "failed" {
+			if payload["universe_id"] != universe.ID.String() {
+				t.Errorf("failed progress universe_id = %v, want %s", payload["universe_id"], universe.ID)
+			}
 			sawFailed = true
 		}
 	}

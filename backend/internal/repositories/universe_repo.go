@@ -107,21 +107,24 @@ func (r *UniverseRepo) Delete(ctx context.Context, tx pgx.Tx, id uuid.UUID) erro
 	return nil
 }
 
-func (r *UniverseRepo) FindBySessionID(ctx context.Context, sessionID string) (*models.Universe, error) {
+// FindByUserAndSessionID returns the demo universe for one authenticated user
+// and browser session. A missing row is represented by nil, nil so callers can
+// distinguish it from a database failure without exposing another user's demo.
+func (r *UniverseRepo) FindByUserAndSessionID(ctx context.Context, userID uuid.UUID, sessionID string) (*models.Universe, error) {
 	query := `
 		SELECT id, user_id, name, description, genre_tags, session_id, is_demo_template, created_at, updated_at
-		FROM universes WHERE session_id = $1
+		FROM universes WHERE user_id = $1 AND session_id = $2
 	`
 	u := &models.Universe{}
-	err := r.pool.QueryRow(ctx, query, sessionID).Scan(
+	err := r.pool.QueryRow(ctx, query, userID, sessionID).Scan(
 		&u.ID, &u.UserID, &u.Name, &u.Description, &u.GenreTags,
 		&u.SessionID, &u.IsDemoTemplate, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("universe not found for session")
+		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("find universe by session: %w", err)
+		return nil, fmt.Errorf("find universe by user and session: %w", err)
 	}
 	return u, nil
 }

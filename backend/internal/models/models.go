@@ -22,7 +22,7 @@ type Universe struct {
 	Name           string    `json:"name"`
 	Description    string    `json:"description,omitempty"`
 	GenreTags      []string  `json:"genre_tags"`
-	SessionID      *string   `json:"session_id,omitempty"`
+	SessionID      *string   `json:"-"`
 	IsDemoTemplate bool      `json:"is_demo_template"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -420,6 +420,7 @@ type AnalysisResultPayload struct {
 	ParagraphRef   string          `json:"paragraph_ref"`
 	WorkID         uuid.UUID       `json:"work_id"`
 	ChapterID      uuid.UUID       `json:"chapter_id"`
+	UniverseID     uuid.UUID       `json:"universe_id"`
 	Entities       []EntityBrief   `json:"entities"`
 	Contradictions []Contradiction `json:"contradictions"`
 	PlotHoles      []PlotHole      `json:"plot_holes"`
@@ -433,6 +434,7 @@ type AnalysisFailedPayload struct {
 	ParagraphRef string    `json:"paragraph_ref"`
 	WorkID       uuid.UUID `json:"work_id"`
 	ChapterID    uuid.UUID `json:"chapter_id"`
+	UniverseID   uuid.UUID `json:"universe_id"`
 	Reason       string    `json:"reason"`
 }
 
@@ -443,12 +445,14 @@ type EntityBrief struct {
 }
 
 type ContradictionAlertPayload struct {
+	UniverseID    uuid.UUID     `json:"universe_id"`
 	Contradiction Contradiction `json:"contradiction"`
 }
 
 type EntityDiscoveredPayload struct {
-	Entity Entity `json:"entity"`
-	IsNew  bool   `json:"is_new"`
+	UniverseID uuid.UUID `json:"universe_id"`
+	Entity     Entity    `json:"entity"`
+	IsNew      bool      `json:"is_new"`
 }
 
 type GraphUpdatedPayload struct {
@@ -468,6 +472,7 @@ type AnalysisProgressPayload struct {
 	ParagraphRef       string      `json:"paragraph_ref"`
 	Stage              string      `json:"stage"`
 	ChapterID          uuid.UUID   `json:"chapter_id"`
+	UniverseID         uuid.UUID   `json:"universe_id"`
 	EntityCount        *int        `json:"entity_count,omitempty"`
 	ContradictionCount *int        `json:"contradiction_count,omitempty"`
 	PlotHoleCount      *int        `json:"plot_hole_count,omitempty"`
@@ -475,7 +480,20 @@ type AnalysisProgressPayload struct {
 }
 
 type ContextualRecallPayload struct {
-	Items []RecallItem `json:"items"`
+	UniverseID uuid.UUID    `json:"universe_id"`
+	Items      []RecallItem `json:"items"`
+}
+
+// IngestionProgressPayload is the authoritative, universe-scoped progress
+// event emitted while an uploaded document is processed asynchronously.
+type IngestionProgressPayload struct {
+	JobID             uuid.UUID `json:"job_id"`
+	UniverseID        uuid.UUID `json:"universe_id"`
+	Status            string    `json:"status"`
+	ChaptersProcessed int       `json:"chapters_processed"`
+	TotalChapters     int       `json:"total_chapters"`
+	Action            string    `json:"action,omitempty"`
+	ETASeconds        *int      `json:"eta_seconds,omitempty"`
 }
 
 type RecallItem struct {

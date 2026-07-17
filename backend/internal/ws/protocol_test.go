@@ -121,6 +121,7 @@ func TestIngestionProgressMessage(t *testing.T) {
 
 	payload := map[string]any{
 		"job_id":             uuid.New().String(),
+		"universe_id":        uuid.New().String(),
 		"status":             "running",
 		"chapters_processed": 3,
 		"total_chapters":     10,
@@ -151,17 +152,22 @@ func TestIngestionProgressMessage(t *testing.T) {
 	if ch := recovered["chapters_processed"]; ch != float64(3) {
 		t.Errorf("recovered chapters_processed: %v", ch)
 	}
+	if recovered["universe_id"] == nil {
+		t.Error("recovered ingestion_progress missing universe_id")
+	}
 }
 
 // TestServerPayloadSerialization verifies server→client payloads round-trip.
 func TestServerPayloadSerialization(t *testing.T) {
 	// analysis_result
 	uid := uuid.New()
+	universeID := uuid.New()
 	arPayload := models.AnalysisResultPayload{
 		SubmissionID: "submission-1",
 		ParagraphRef: "chapter:12",
 		WorkID:       uid,
 		ChapterID:    uid,
+		UniverseID:   universeID,
 		Entities: []models.EntityBrief{
 			{ID: uuid.New(), Name: "Alice", Type: "character"},
 		},
@@ -175,23 +181,24 @@ func TestServerPayloadSerialization(t *testing.T) {
 	if len(recovered.Entities) != 1 {
 		t.Errorf("expected 1 entity, got %d", len(recovered.Entities))
 	}
-	if recovered.SubmissionID != "submission-1" || recovered.ParagraphRef != "chapter:12" {
+	if recovered.SubmissionID != "submission-1" || recovered.ParagraphRef != "chapter:12" || recovered.UniverseID != universeID {
 		t.Errorf("analysis_result correlation fields were not preserved: %+v", recovered)
 	}
 
 	failureBytes, _ := json.Marshal(models.AnalysisFailedPayload{
-		SubmissionID: "submission-1", ParagraphRef: "chapter:12", WorkID: uid, ChapterID: uid, Reason: "service unavailable",
+		SubmissionID: "submission-1", ParagraphRef: "chapter:12", WorkID: uid, ChapterID: uid, UniverseID: universeID, Reason: "service unavailable",
 	})
 	var failed models.AnalysisFailedPayload
 	if err := json.Unmarshal(failureBytes, &failed); err != nil {
 		t.Fatalf("round-trip analysis_failed: %v", err)
 	}
-	if failed.Reason != "service unavailable" {
+	if failed.Reason != "service unavailable" || failed.UniverseID != universeID {
 		t.Errorf("failure reason = %q", failed.Reason)
 	}
 
 	// contextual_recall
 	crPayload := models.ContextualRecallPayload{
+		UniverseID: universeID,
 		Items: []models.RecallItem{
 			{EntityID: uuid.New(), Fact: "Bob is a wizard", Score: 0.95, Source: "graph"},
 			{EntityID: uuid.New(), Fact: "Bob was seen in chapter 5", Score: 0.72, Source: "mention"},
@@ -208,5 +215,8 @@ func TestServerPayloadSerialization(t *testing.T) {
 	}
 	if recoveredCR.Items[0].Score != 0.95 {
 		t.Errorf("score: %f", recoveredCR.Items[0].Score)
+	}
+	if recoveredCR.UniverseID != universeID {
+		t.Errorf("contextual_recall universe_id = %s, want %s", recoveredCR.UniverseID, universeID)
 	}
 }

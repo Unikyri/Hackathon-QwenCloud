@@ -1,13 +1,21 @@
 /* ── IngestPage ──────────────────────────────────────────────────── */
 .wrap {
-  padding: 40px 30px;
+  padding: 24px;
   max-width: 700px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
+  align-items: stretch;
   animation: qrise 0.3s ease both;
+}
+
+.standalone { padding-top: 40px; }
+
+.headerRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 .heading {
@@ -15,7 +23,7 @@
   font-size: 24px;
   font-weight: 500;
   color: var(--ink);
-  margin-bottom: 6px;
+  margin: 0 0 6px;
 }
 
 .subhead {
@@ -24,6 +32,36 @@
   margin-bottom: 22px;
   line-height: 1.5;
 }
+
+.closeButton,
+.continueButton {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  padding: 7px 12px;
+  background: var(--bg-card);
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.closeButton:hover,
+.closeButton:focus-visible {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.continueButton {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: var(--parchment-hi);
+  margin-top: 12px;
+}
+
+.continueButton:hover,
+.continueButton:focus-visible { background: var(--teal-deep); }
 
 /* Drop zone */
 .dropzone {
@@ -35,7 +73,10 @@
   background: var(--bg-card);
   transition: border-color 0.15s, background 0.15s;
   margin-bottom: 16px;
+  width: 100%;
+  font: inherit;
 }
+.dropzone:disabled { cursor: progress; opacity: 0.7; }
 .dropzone:hover, .dropzone[data-drag-over] {
   border-color: var(--teal);
   background: var(--teal-soft);
@@ -59,6 +100,33 @@
   font-size: 12.5px;
   color: var(--danger);
   margin-bottom: 10px;
+}
+
+.errorState {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line));
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+  color: var(--danger);
+  font-size: 12.5px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.errorState p { margin: 0; }
+
+.loading,
+.empty {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg-card);
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
 }
 
 /* Job cards */
@@ -105,6 +173,7 @@
   border-radius: var(--r-pill);
 }
 .jobStatus[data-done] { color: var(--success); background: rgba(53,107,71,.1); }
+.jobStatus[data-failed] { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 
 .checkStatusBtn {
   padding: 3px 10px;
@@ -140,4 +209,12 @@
   color: var(--muted);
   font-size: 12px;
   text-align: left;
+}
+
+@media (max-width: 640px) {
+  .wrap { padding: 18px; }
+  .headerRow,
+  .errorState,
+  .jobHeader { align-items: flex-start; flex-direction: column; }
+  .closeButton { align-self: flex-start; }
 }

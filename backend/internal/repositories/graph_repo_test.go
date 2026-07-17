@@ -241,6 +241,135 @@ func TestGraphRepoNHopTraversal(t *testing.T) {
 	if len(edges) < 1 {
 		t.Errorf("NHopTraversal should return at least 1 edge, got %d", len(edges))
 	}
+	for _, edge := range edges {
+		if edge.Type != "ALLY_OF" {
+			t.Errorf("edge.Type = %q, want AGE relationship type ALLY_OF", edge.Type)
+		}
+	}
+}
+
+func TestGraphRepoBoundedNHopTraversalIncludesSecondHop(t *testing.T) {
+	pool := testutil.SetupTestDB(t)
+	testutil.RunMigrationsUpTo(t, pool, "011")
+	if !testutil.CheckAGE(t, pool) {
+		t.Skip("Apache AGE extension not available; skipping graph-dependent test")
+	}
+
+	ctx := context.Background()
+	repo := NewGraphRepo(pool)
+	graphID := uuid.NewString()
+	if err := repo.CreateGraph(ctx, graphID); err != nil {
+		t.Fatalf("CreateGraph: %v", err)
+	}
+	graphName := "universe_" + graphID
+	entityIDs := []string{uuid.NewString(), uuid.NewString(), uuid.NewString()}
+	for _, entityID := range entityIDs {
+		if err := repo.CreateNode(ctx, graphName, "Character", map[string]interface{}{
+			"entity_id": entityID, "name": entityID, "status": "active", "relevance_score": 0.5,
+		}); err != nil {
+			t.Fatalf("CreateNode(%s): %v", entityID, err)
+		}
+	}
+	if err := repo.CreateEdge(ctx, graphName, entityIDs[0], entityIDs[1], "KNOWS", nil); err != nil {
+		t.Fatalf("CreateEdge(first hop): %v", err)
+	}
+	if err := repo.CreateEdge(ctx, graphName, entityIDs[1], entityIDs[2], "KNOWS", nil); err != nil {
+		t.Fatalf("CreateEdge(second hop): %v", err)
+	}
+
+	result, err := repo.BoundedNHopTraversal(ctx, graphName, entityIDs[0], 2)
+	if err != nil {
+		t.Fatalf("BoundedNHopTraversal: %v", err)
+	}
+	if result.Truncated {
+		t.Fatalf("small two-hop graph should not be truncated: %#v", result)
+	}
+	if result.Limits.Hops != 2 {
+		t.Fatalf("applied hops = %d, want 2", result.Limits.Hops)
+	}
+
+	returnedIDs := make(map[string]struct{}, len(result.Nodes))
+	for _, node := range result.Nodes {
+		returnedIDs[node.ID] = struct{}{}
+	}
+	if _, ok := returnedIDs[entityIDs[2]]; !ok {
+		t.Fatalf("second-hop entity %q missing from %#v", entityIDs[2], result.Nodes)
+	}
+}
+
+func TestBoundedGraphCollectorReportsNodeAndEdgeTruncation(t *testing.T) {
+	t.Run("node limit", func(t *testing.T) {
+		collector := newBoundedGraphCollector(2, 2)
+		collector.addRows([]graphRow{
+			graphRowForTest("focal", "first", "edge-1"),
+			graphRowForTest("focal", "second", "edge-2"),
+		})
+
+		nodes, edges := collector.nodesAndEdges()
+		if !collector.truncated {
+			t.Fatal("expected node cap to mark the neighborhood as truncated")
+		}
+		if len(nodes) != 2 || len(edges) != 1 {
+			t.Errorf("node-limited graph = %d nodes, %d edges; want 2 nodes, 1 edge", len(nodes), len(edges))
+		}
+	})
+
+	t.Run("edge limit", func(t *testing.T) {
+		collector := newBoundedGraphCollector(3, 1)
+		collector.addRows([]graphRow{
+			graphRowForTest("focal", "first", "edge-1"),
+			graphRowForTest("focal", "second", "edge-2"),
+		})
+
+		nodes, edges := collector.nodesAndEdges()
+		if !collector.truncated {
+			t.Fatal("expected edge cap to mark the neighborhood as truncated")
+		}
+		if len(nodes) != 2 || len(edges) != 1 {
+			t.Errorf("edge-limited graph = %d nodes, %d edges; want 2 nodes, 1 edge", len(nodes), len(edges))
+		}
+		if edges[0].Source != "focal" || edges[0].Target != "first" {
+			t.Errorf("retained edge = %#v, want focal -> first", edges[0])
+		}
+	})
+}
+
+func TestGraphTraversalLimitsNormalizePublicHops(t *testing.T) {
+	tests := []struct {
+		input int
+		want  int
+	}{
+		{input: -1, want: 1},
+		{input: 0, want: 1},
+		{input: 1, want: 1},
+		{input: 2, want: 2},
+		{input: 99, want: GraphTraversalMaxHops},
+	}
+
+	for _, tt := range tests {
+		t.Run("hops", func(t *testing.T) {
+			result := NewGraphTraversalResult(tt.input)
+			if result.Limits.Hops != tt.want {
+				t.Errorf("applied hops = %d, want %d", result.Limits.Hops, tt.want)
+			}
+			if result.Limits.MaxHops != GraphTraversalMaxHops || result.Limits.NodeLimit != GraphTraversalNodeLimit || result.Limits.EdgeLimit != GraphTraversalEdgeLimit || result.Limits.ResultLimit != GraphTraversalResultLimit {
+				t.Errorf("unexpected traversal limits: %#v", result.Limits)
+			}
+		})
+	}
+}
+
+func graphRowForTest(source, target, edgeID string) graphRow {
+	sourceRaw := `{"properties":{"entity_id": "` + source + `"}}`
+	targetRaw := `{"properties":{"entity_id": "` + target + `"}}`
+	relationshipRaw := `{"id":"` + edgeID + `"}`
+	relationshipType := `"KNOWS"`
+	return graphRow{
+		node:             &sourceRaw,
+		relationship:     &relationshipRaw,
+		target:           &targetRaw,
+		relationshipType: &relationshipType,
+	}
 }
 
 func TestGraphRepoNHopTraversalIncludesIsolatedFocal(t *testing.T) {

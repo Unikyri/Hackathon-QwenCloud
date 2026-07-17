@@ -44,7 +44,12 @@
 .saveButton:disabled { cursor: default; opacity: 0.55; }
 
 .error { margin: 0 0 16px; color: var(--danger); font-size: 12px; }
+.savedStatus { margin: 0 0 16px; color: var(--success); font-size: 12px; }
 .state { padding: 56px 20px; border: 1px dashed var(--line-strong); border-radius: var(--r-md); color: var(--muted); text-align: center; }
+.state p { margin: 0; }
+.state p + p { margin-top: 8px; }
+.errorState { border-color: var(--danger-border); color: var(--danger); }
+.retryButton { margin-top: 16px; border: 1px solid var(--teal); border-radius: var(--r-md); background: var(--teal-soft); color: var(--teal); cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; padding: 8px 12px; }
 .groups { display: grid; gap: 26px; }
 .group { display: grid; gap: 11px; }
 .groupHeader { display: flex; align-items: center; gap: 9px; }
@@ -64,6 +69,7 @@
 }
 .card:hover { border-color: var(--line-strong); background: var(--surface-sunken); }
 .cardActive { border-color: var(--teal-soft-12); background: var(--teal-soft); }
+.card:focus-within { outline: 3px solid var(--color-focus); outline-offset: 3px; }
 .card input { width: 15px; height: 15px; margin: 1px 0 0; accent-color: var(--teal); }
 .cardBody { display: grid; align-content: start; gap: 7px; min-width: 0; }
 .cardTopline { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

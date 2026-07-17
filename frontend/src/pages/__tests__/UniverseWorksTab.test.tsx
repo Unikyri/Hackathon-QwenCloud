@@ -8,6 +8,11 @@ import { UniverseContext } from '../../contexts/UniverseContext'
 vi.mock('../UniverseWorksTab.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
 vi.mock('../../components/shared/ImageUpload', () => ({ default: () => null }))
 
+const mockPublish = vi.fn(() => 'feedback-id')
+vi.mock('../../components/feedback', () => ({
+  useFeedback: () => ({ publish: mockPublish }),
+}))
+
 const mockDeleteWork = vi.fn()
 const mockDeleteChapter = vi.fn()
 const mockGetWork = vi.fn()
@@ -30,10 +35,10 @@ const mockRefetchWorks = vi.fn().mockResolvedValue(undefined)
 
 function renderTab(works = twoWorks) {
   return render(
-    <MemoryRouter initialEntries={['/universe/uni-1/works']}>
+    <MemoryRouter initialEntries={['/universe/uni-1/write']}>
       <UniverseContext.Provider value={{ universe, works, refetchWorks: mockRefetchWorks }}>
         <Routes>
-          <Route path="/universe/:universeId/works" element={<UniverseWorksTab />} />
+          <Route path="/universe/:universeId/write" element={<UniverseWorksTab />} />
         </Routes>
       </UniverseContext.Provider>
     </MemoryRouter>
@@ -49,25 +54,25 @@ describe('UniverseWorksTab deletes', () => {
     })
   })
 
-  it('does not delete a work when the confirm dialog is cancelled', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
+  it('does not delete a work when inline deletion is cancelled', async () => {
     renderTab()
 
     const user = userEvent.setup()
-    await user.click(screen.getAllByLabelText('Delete work')[0])
+    await user.click(screen.getByLabelText('Delete First Work'))
+    expect(screen.getByRole('alertdialog', { name: 'Confirm deletion' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    expect(window.confirm).toHaveBeenCalled()
     expect(mockDeleteWork).not.toHaveBeenCalled()
     expect(mockRefetchWorks).not.toHaveBeenCalled()
   })
 
-  it('deletes the work and refetches on confirm', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  it('deletes the work and refetches after explicit confirmation', async () => {
     mockDeleteWork.mockResolvedValue(undefined)
     renderTab()
 
     const user = userEvent.setup()
-    await user.click(screen.getAllByLabelText('Delete work')[0])
+    await user.click(screen.getByLabelText('Delete First Work'))
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
 
     await waitFor(() => {
       expect(mockDeleteWork).toHaveBeenCalledWith('work-1')
@@ -76,44 +81,40 @@ describe('UniverseWorksTab deletes', () => {
   })
 
   it('does not open the work when clicking its delete button', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
     renderTab()
 
     const user = userEvent.setup()
-    await user.click(screen.getAllByLabelText('Delete work')[0])
+    await user.click(screen.getByLabelText('Delete First Work'))
 
-    // Still on the works grid — the card click (which opens WorkDetail) must
-    // not fire from the delete button.
-    expect(screen.getByText('Works & Chapters')).toBeInTheDocument()
+    expect(screen.getByText('Write')).toBeInTheDocument()
     expect(mockGetWork).not.toHaveBeenCalled()
   })
 
-  it('does not delete a chapter when the confirm dialog is cancelled', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
-    // Single work auto-selects into WorkDetail.
+  it('does not delete a chapter when inline deletion is cancelled', async () => {
     renderTab([twoWorks[0]])
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Open First Work' }))
     await screen.findByText('Chapter One')
 
-    const user = userEvent.setup()
-    await user.click(screen.getByLabelText('Delete chapter'))
+    await user.click(screen.getByLabelText('Delete Chapter One'))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    expect(window.confirm).toHaveBeenCalled()
     expect(mockDeleteChapter).not.toHaveBeenCalled()
   })
 
-  it('deletes the chapter and refetches on confirm', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  it('deletes the chapter after explicit confirmation', async () => {
     mockDeleteChapter.mockResolvedValue(undefined)
     renderTab([twoWorks[0]])
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Open First Work' }))
     await screen.findByText('Chapter One')
     expect(mockListChapters).toHaveBeenCalledTimes(1)
 
-    const user = userEvent.setup()
-    await user.click(screen.getByLabelText('Delete chapter'))
+    await user.click(screen.getByLabelText('Delete Chapter One'))
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
 
     await waitFor(() => {
       expect(mockDeleteChapter).toHaveBeenCalledWith('ch-1')
-      expect(mockListChapters).toHaveBeenCalledTimes(2)
     })
   })
 })

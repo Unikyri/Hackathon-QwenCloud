@@ -1,39 +1,81 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import GraphCanvas from '../GraphCanvas'
 import { useGraphStore } from '../../../stores/graphStore'
 
-vi.mock('reactflow', () => ({
-  default: ({ nodes }: { nodes: Array<{ id: string }> }) => (
-    <div data-testid="graph-flow" data-node-ids={nodes.map((node) => node.id).join(',')} />
-  ),
-  Background: () => null,
-  Controls: () => null,
-  MiniMap: () => null,
-  Handle: () => null,
-  Position: { Top: 'top', Bottom: 'bottom' },
-}))
+const { mockCore, mockCytoscape } = vi.hoisted(() => {
+  const mockCore = {
+    add: vi.fn(),
+    destroy: vi.fn(),
+    elements: vi.fn(() => ({ remove: vi.fn(), unselect: vi.fn() })),
+    fit: vi.fn(),
+    layout: vi.fn(() => ({ run: vi.fn() })),
+    on: vi.fn(),
+    resize: vi.fn(),
+    $id: vi.fn(() => ({ select: vi.fn() })),
+  }
+  const mockCytoscape = Object.assign(vi.fn(() => mockCore), { use: vi.fn() })
+
+  return { mockCore, mockCytoscape }
+})
+
+const graphLimits = { hops: 2, max_hops: 2, node_limit: 96, edge_limit: 160, result_limit: 256 }
+
+vi.mock('cytoscape', () => ({ default: mockCytoscape }))
+vi.mock('cytoscape-fcose', () => ({ default: {} }))
+
+function latestAddedNodeIds() {
+  const calls = mockCore.add.mock.calls
+  const latestElements = (calls[calls.length - 1]?.[0] ?? []) as Array<{
+    group: string
+    data: { id: string }
+  }>
+
+  return latestElements
+    .filter((element) => element.group === 'nodes')
+    .map((element) => element.data.id)
+}
 
 beforeEach(() => {
+  vi.clearAllMocks()
   useGraphStore.setState({
     nodes: [
-      { id: 'active', type: 'character', position: { x: 0, y: 0 }, data: { label: 'Active', status: 'active' } },
-      { id: 'archived', type: 'object', position: { x: 120, y: 0 }, data: { label: 'Archived', status: 'archived' } },
+      { id: 'active', type: 'character', data: { label: 'Active', status: 'active' } },
+      { id: 'archived', type: 'object', data: { label: 'Archived', status: 'archived' } },
     ],
     edges: [],
     nodeFilter: { character: true, place: true, object: true, faction: true, event: true, world_rule: true, plot_arc: true },
     showArchived: false,
+    limits: graphLimits,
   })
 })
 
 describe('GraphCanvas', () => {
-  it('hides archived nodes until the archived toggle is enabled', () => {
-    const { rerender } = render(<GraphCanvas />)
-    expect(screen.getByTestId('graph-flow')).toHaveAttribute('data-node-ids', 'active')
+  it('hides archived nodes until the archived toggle is enabled', async () => {
+    render(<GraphCanvas />)
+    expect(screen.getByRole('application', { name: /story relationship map/i })).toBeInTheDocument()
 
-    useGraphStore.setState({ showArchived: true })
-    rerender(<GraphCanvas />)
+    await waitFor(() => {
+      expect(latestAddedNodeIds()).toEqual(['active'])
+    })
 
-    expect(screen.getByTestId('graph-flow')).toHaveAttribute('data-node-ids', 'active,archived')
+    act(() => {
+      useGraphStore.setState({ showArchived: true })
+    })
+
+    await waitFor(() => {
+      expect(latestAddedNodeIds()).toEqual(['active', 'archived'])
+    })
+  })
+
+  it('does not run fCoSE when graph data lacks traversal bounds', async () => {
+    useGraphStore.setState({ limits: null })
+
+    render(<GraphCanvas />)
+
+    await waitFor(() => {
+      expect(mockCore.add).not.toHaveBeenCalled()
+      expect(mockCore.layout).not.toHaveBeenCalled()
+    })
   })
 })

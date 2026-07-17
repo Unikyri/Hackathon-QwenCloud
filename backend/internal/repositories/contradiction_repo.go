@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 
 	"github.com/quill/backend/internal/models"
 )
+
+var ErrContradictionNotFound = errors.New("contradiction not found")
 
 type ContradictionRepo struct {
 	pool *pgxpool.Pool
@@ -88,21 +91,27 @@ func (r *ContradictionRepo) ListByUniverse(ctx context.Context, universeID uuid.
 	return result, nil
 }
 
-func (r *ContradictionRepo) Resolve(ctx context.Context, id uuid.UUID, resolvedAt *time.Time) error {
-	query := `UPDATE contradictions SET status = 'resolved', resolved_at = $2 WHERE id = $1`
-	_, err := r.pool.Exec(ctx, query, id, resolvedAt)
+func (r *ContradictionRepo) Resolve(ctx context.Context, id, universeID uuid.UUID, resolvedAt *time.Time) error {
+	query := `UPDATE contradictions SET status = 'resolved', resolved_at = $3 WHERE id = $1 AND universe_id = $2`
+	result, err := r.pool.Exec(ctx, query, id, universeID, resolvedAt)
 	if err != nil {
 		return fmt.Errorf("resolve contradiction: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrContradictionNotFound
 	}
 	return nil
 }
 
 // Dismiss marks a contradiction as dismissed without resolving.
-func (r *ContradictionRepo) Dismiss(ctx context.Context, id uuid.UUID) error {
-	query := `UPDATE contradictions SET status = 'dismissed', resolved_at = NOW() WHERE id = $1`
-	_, err := r.pool.Exec(ctx, query, id)
+func (r *ContradictionRepo) Dismiss(ctx context.Context, id, universeID uuid.UUID) error {
+	query := `UPDATE contradictions SET status = 'dismissed', resolved_at = NOW() WHERE id = $1 AND universe_id = $2`
+	result, err := r.pool.Exec(ctx, query, id, universeID)
 	if err != nil {
 		return fmt.Errorf("dismiss contradiction: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrContradictionNotFound
 	}
 	return nil
 }

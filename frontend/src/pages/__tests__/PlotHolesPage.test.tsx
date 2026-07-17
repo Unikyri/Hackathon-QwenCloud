@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import PlotHolesPage from '../PlotHolesPage'
 import { UniverseContext } from '../../contexts/UniverseContext'
@@ -53,14 +54,22 @@ describe('PlotHolesPage', () => {
     })
   })
 
-  it('shows error state on API failure', async () => {
-    mockGetPlotHoles.mockRejectedValue(new Error('Server error'))
+  it('shows a retryable error state on API failure', async () => {
+    mockGetPlotHoles
+      .mockRejectedValueOnce(new Error('Server error'))
+      .mockResolvedValueOnce({ plot_holes: [{ id: 'ph1', title: 'Recovered thread', status: 'open' }] })
     renderPage()
 
     await waitFor(() => {
-      expect(screen.getByTestId('error-state')).toBeInTheDocument()
+      expect(screen.getByRole('alert')).toBeInTheDocument()
       expect(screen.getByText('Server error')).toBeInTheDocument()
     })
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(mockGetPlotHoles).toHaveBeenCalledTimes(2))
+    expect(screen.getByText('Recovered thread')).toBeInTheDocument()
   })
 
   it('renders each plot hole as an open-thread card with title and description', async () => {

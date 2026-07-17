@@ -204,15 +204,15 @@ because the UI shows the actual system reasoning and lifecycle.
   hidden-by-default edge labels, and retry behavior.
 - [ ] Integration-test multi-genre creation/editing, save/analyze/recover, candidate action,
   recall explanation, and failed-request recovery.
-- [ ] Add Playwright coverage for the full guided demo at desktop and mobile widths,
+- [x] Add Playwright coverage for the full guided demo at desktop and mobile widths,
   keyboard-only navigation, and no silent error state.
-- [ ] Add automated accessibility checks, contrast checks, focus order, and reduced-motion
+- [x] Add automated accessibility checks, contrast checks, focus order, and reduced-motion
   checks.
-- [ ] Verify the frontend build, test suite, lazy graph chunk, and visual behavior at the
+- [x] Verify the frontend build, test suite, lazy graph chunk, and visual behavior at the
   judge recording width.
-- [ ] Update the sprint index and document that the Qwen local rules snapshot is stale: the
-  official deadline is July 20, 2026.
-- [ ] Keep a separate submission checklist for required evidence: Qwen Cloud/Alibaba
+- [x] Update the sprint index and refresh the Qwen local rules snapshot from the official
+  source; the submission deadline is July 20, 2026.
+- [x] Keep a separate submission checklist for required evidence: Qwen Cloud/Alibaba
   deployment, public license/repository, architecture diagram, and a demo under three
   minutes; OpenAI Codex/GPT-5.6 usage evidence and session ID cannot be satisfied by UI
   polish alone.

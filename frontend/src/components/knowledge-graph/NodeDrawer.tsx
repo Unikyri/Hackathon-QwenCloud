@@ -12,15 +12,16 @@ export default function NodeDrawer() {
   const node = nodes.find((n) => n.id === selectedNodeId)
   if (!node) return null
 
-  const meta = ENTITY_TYPE_META[node.type] || ENTITY_TYPE_META.character
-  const description = (node.data.description as string) || ''
-  const relevanceScore = node.data.relevanceScore as number | undefined
-  const status = node.data.status as string | undefined
+  const meta = node.type === 'unknown'
+    ? { label: 'Unknown', color: 'currentColor', glyph: '?' }
+    : ENTITY_TYPE_META[node.type]
+  const relevanceScore = node.data.relevanceScore
+  const status = node.data.status
 
   return (
     <div className={styles.drawer}>
       <div className={styles.drawerHeader}>
-        <h3 className={styles.drawerTitle}>{node.data.label as string}</h3>
+        <h3 className={styles.drawerTitle}>{node.data.label}</h3>
         <button className={`glyph ${styles.drawerClose}`} onClick={() => selectNode(null)}>
           ✕
         </button>
@@ -40,7 +41,6 @@ export default function NodeDrawer() {
           <span className={styles.drawerFieldValue}>{Math.round(relevanceScore * 100)}%</span>
         </div>
       )}
-      {description && <p className={styles.drawerDesc}>{description}</p>}
       {Object.entries(node.data)
         .filter(([k]) => !['label', 'description', 'type', 'relevanceScore', 'status'].includes(k))
         .map(([key, value]) => (

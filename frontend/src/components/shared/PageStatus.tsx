@@ -9,8 +9,8 @@ interface PageStatusProps {
 export default function PageStatus({ loading, error, onRetry }: PageStatusProps) {
   if (loading) {
     return (
-      <div className={styles.statusWrap} data-testid="loading-state">
-        <div className={styles.spinner} />
+      <div className={styles.statusWrap} data-testid="loading-state" role="status" aria-live="polite">
+        <div className={styles.spinner} aria-hidden="true" />
         <p className={styles.loadingText}>Loading…</p>
       </div>
     )
@@ -18,10 +18,10 @@ export default function PageStatus({ loading, error, onRetry }: PageStatusProps)
 
   if (error) {
     return (
-      <div className={styles.statusWrap} data-testid="error-state">
+      <div className={styles.statusWrap} data-testid="error-state" role="alert">
         <p className={styles.errorText}>{error}</p>
         {onRetry && (
-          <button className={styles.retryBtn} onClick={onRetry}>
+          <button className={styles.retryBtn} type="button" onClick={onRetry}>
             Retry
           </button>
         )}

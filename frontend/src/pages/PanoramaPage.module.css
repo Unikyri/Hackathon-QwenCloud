@@ -115,6 +115,31 @@
   color: var(--muted);
 }
 
+.degradedNotice {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--warning);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  background: var(--gold-soft);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.degradedRetry {
+  flex: 0 0 auto;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  padding: 0;
+  background: transparent;
+  color: var(--teal);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
 /* Two-column grid */
 .columns {
   display: grid;

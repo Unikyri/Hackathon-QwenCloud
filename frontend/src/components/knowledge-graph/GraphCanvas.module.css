@@ -1,85 +1,41 @@
-/* Canvas wrapper */
 .canvasWrap {
-  position: relative;
-  width: 100%;
-  height: 70vh;
-  min-height: 400px;
-  border-radius: var(--r-lg);
+  min-height: 440px;
+  height: 100%;
   overflow: hidden;
-  background: var(--bg-graph);
   border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg-graph);
 }
 
-.flowCanvas {
+.canvas {
   width: 100%;
   height: 100%;
+  min-height: inherit;
+  outline: none;
 }
 
-/* ReactFlow overrides */
-:global(.react-flow__background) {
-  background: var(--bg-graph) !important;
+.canvas:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: -3px;
 }
 
-:global(.react-flow__node) {
-  font-size: 12px;
-}
-
-:global(.react-flow__edge-path) {
-  stroke: #a99f86 !important;
-  stroke-width: 2;
-}
-
-:global(.react-flow__edge-text) {
-  fill: var(--muted) !important;
-  font-size: 11px;
-}
-
-:global(.react-flow__controls-button) {
-  background: var(--bg-card) !important;
-  border-color: var(--line) !important;
-  fill: var(--ink) !important;
-}
-
-:global(.react-flow__controls-button:hover) {
-  background: var(--bg-input) !important;
-}
-
-:global(.react-flow__minimap) {
-  background: var(--bg-card) !important;
-  border: 1px solid var(--line) !important;
-  border-radius: var(--r-md);
-}
-
-.controls {
-  background: transparent;
-}
-
-.minimap {
-  background: var(--bg-card);
-}
-
-/* Filter bar — doubles as floating legend card (see GraphControls.tsx) */
 .filterBar {
   display: flex;
-  gap: 14px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
-  padding: 10px 16px;
-  background: var(--bg-card);
+  gap: 8px 14px;
+  padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  box-shadow: 0 4px 14px rgba(43, 38, 32, 0.06);
+  background: var(--bg-card);
 }
 
 .filterLabel {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  font-family: var(--sans);
-  font-size: 12.5px;
   color: var(--ink-soft);
-  user-select: none;
+  font: 600 12px var(--sans);
 }
 
 .filterCheckbox {
@@ -88,157 +44,18 @@
 }
 
 .filterBadge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: var(--r-sm);
-  font-size: 11px;
-  color: var(--parchment-hi);
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
 }
 
 .filterText {
   text-transform: capitalize;
 }
 
-/* Custom node */
-.customNode {
-  background: var(--bg-card);
-  border: 2px solid var(--ink);
-  border-radius: var(--r-pill);
-  padding: 8px 14px;
-  min-width: 100px;
-  box-shadow: 0 2px 8px rgba(43, 38, 32, 0.08);
-  cursor: pointer;
-  transform: scale(var(--node-scale, 1));
-  transform-origin: center;
-  transition: box-shadow 0.2s, opacity 0.2s, transform 0.2s;
-}
-
-.customNode:hover {
-  box-shadow: 0 4px 16px rgba(43, 38, 32, 0.16);
-}
-
-.nodeContent {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.nodeIcon {
-  font-size: 15px;
-  flex-shrink: 0;
-}
-
-.nodeLabel {
-  font-family: var(--sans);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.handle {
-  width: 8px !important;
-  height: 8px !important;
-  background: var(--ink) !important;
-  border: 2px solid var(--bg-card) !important;
-}
-
-/* Drawer */
-.drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 300px;
-  height: 100%;
-  background: var(--bg-card);
-  border-left: 1px solid var(--line);
-  padding: 20px;
-  overflow-y: auto;
-  z-index: 10;
-  box-shadow: -4px 0 16px rgba(43, 38, 32, 0.1);
-  animation: slideIn 0.2s ease;
-}
-
-@keyframes slideIn {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
-}
-
-.drawerHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 12px;
-}
-
-.drawerTitle {
-  margin: 0;
-  font-family: var(--serif);
-  font-weight: 500;
-  font-size: 18px;
-  color: var(--ink);
-}
-
-.drawerClose {
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  font-size: 16px;
-  cursor: pointer;
-  padding: 4px;
-  line-height: 1;
-}
-
-.drawerClose:hover {
-  color: var(--danger);
-}
-
-.drawerType {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  font-weight: 500;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-  background: var(--surface-sunken);
-  padding: 3px 10px;
-  border-radius: var(--r-pill);
-  margin-bottom: 14px;
-}
-
-.drawerDesc {
-  font-family: var(--sans);
-  font-size: 13px;
-  color: var(--muted);
-  line-height: 1.55;
-  margin: 0 0 16px 0;
-}
-
-.drawerField {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 10px;
-}
-
-.drawerFieldKey {
-  font-family: var(--mono);
-  font-size: 9.5px;
-  text-transform: uppercase;
-  color: var(--muted-2);
-  letter-spacing: 0.06em;
-}
-
-.drawerFieldValue {
-  font-family: var(--sans);
-  font-size: 13px;
-  color: var(--ink);
-  word-break: break-word;
+@media (prefers-reduced-motion: reduce) {
+  .canvas {
+    scroll-behavior: auto;
+  }
 }

@@ -17,8 +17,8 @@ import (
 const sagaUniverseIDString = "00000000-0000-0000-0000-000000000002"
 
 // buildRealMemoryService constructs a MemoryService wired to real repositories
-// against the saga universe. It applies migrations up to 019 so the saga seed
-// data and consolidation table exist.
+// against the saga universe. It applies migrations up to 021 so the saga seed,
+// consolidation table, and current universe schema are available.
 func buildRealMemoryService(t *testing.T, pool *pgxpool.Pool) (*services.MemoryService, uuid.UUID) {
 	t.Helper()
 
@@ -56,7 +56,10 @@ func runMigrationsForEval(t *testing.T, pool *pgxpool.Pool) {
 		}
 	}()
 
-	testutil.RunMigrationsUpTo(t, pool, "019")
+	// Evaluation services read the current Universe shape, including
+	// genre_tags introduced by migration 021. Keep this harness aligned with
+	// production schema while leaving later demo-only migrations out of scope.
+	testutil.RunMigrationsUpTo(t, pool, "021")
 }
 
 // makeSyntheticEmbedding returns a deterministic 1024-dim embedding.

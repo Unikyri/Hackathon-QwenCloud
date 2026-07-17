@@ -1,127 +1,423 @@
-import { useState, useEffect } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { GenreTagPicker } from '../components/genres'
+import { useFeedback } from '../components/feedback'
 import { api } from '../lib/api'
-import { useUniverseStore } from '../stores/universeStore'
-import { GENRE_OPTIONS, selectedValues } from '../lib/genres'
+import { GENRE_OPTIONS } from '../lib/genres'
+import { guidedDemoSessionId, rememberGuidedDemoUniverse } from './guidedDemo'
 import styles from './DashboardPage.module.css'
+
+type UniverseSummary = {
+  id: string
+  name: string
+  description?: string
+  genre_tags?: string[]
+  genre?: string
+}
+
+type StatusTone = 'info' | 'success' | 'error'
+type HomeStatus = { tone: StatusTone; message: string }
+type DemoAction = 'clone' | 'reset'
+type DemoState = 'idle' | 'setting-up' | 'ready' | 'resetting' | 'failed'
+
+const genreLabels = new Map<string, string>(
+  GENRE_OPTIONS.map(({ value, label }) => [value, label] as [string, string]),
+)
+
+function writePath(universeId: string) {
+  return `/universe/${universeId}/write`
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
+function tagsFor(universe: UniverseSummary) {
+  if (universe.genre_tags) return universe.genre_tags.filter(Boolean)
+  return universe.genre ? [universe.genre] : []
+}
+
+function genreName(tag: string) {
+  return genreLabels.get(tag) ?? tag
+}
+
+function pluralize(count: number, singular: string, plural = `${singular}s`) {
+  return count === 1 ? singular : plural
+}
 
 export default function DashboardPage() {
   const navigate = useNavigate()
-  const { universes, fetchUniverses, loading } = useUniverseStore()
-  const [showCreate, setShowCreate] = useState(false)
-  const [newUniverseName, setNewUniverseName] = useState('')
-  const [newUniverseDesc, setNewUniverseDesc] = useState('')
-  const [newUniverseGenres, setNewUniverseGenres] = useState<string[]>(['fantasy'])
-  const [submitError, setSubmitError] = useState<string | null>(null)
   const location = useLocation()
+  const { publish, update } = useFeedback()
   const isForcingNew = new URLSearchParams(location.search).get('new') === 'true'
 
-  useEffect(() => {
-    fetchUniverses()
-  }, [fetchUniverses])
+  const [universes, setUniverses] = useState<UniverseSummary[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [showCreate, setShowCreate] = useState(isForcingNew)
+  const [newUniverseName, setNewUniverseName] = useState('')
+  const [newUniverseDescription, setNewUniverseDescription] = useState('')
+  const [newUniverseGenres, setNewUniverseGenres] = useState<string[]>([])
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [isCreating, setIsCreating] = useState(false)
+  const [status, setStatus] = useState<HomeStatus | null>(null)
+  const [demoState, setDemoState] = useState<DemoState>('idle')
+  const [demoUniverseId, setDemoUniverseId] = useState<string | null>(null)
+  const [lastDemoAction, setLastDemoAction] = useState<DemoAction>('clone')
+  const [demoError, setDemoError] = useState<string | null>(null)
+
+  const loadUniverses = useCallback(async (showLoader = true) => {
+    if (showLoader) setIsLoading(true)
+    setLoadError(null)
+
+    try {
+      const { universes: result } = await api.listUniverses()
+      setUniverses(Array.isArray(result) ? result : [])
+      return true
+    } catch (error) {
+      setLoadError(errorMessage(error, 'We could not load your universe library.'))
+      return false
+    } finally {
+      if (showLoader) setIsLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    if (isForcingNew) {
-      setShowCreate(true)
+    void loadUniverses()
+  }, [loadUniverses])
+
+  useEffect(() => {
+    if (isForcingNew) setShowCreate(true)
+  }, [isForcingNew])
+
+  const summary = useMemo(() => {
+    const withBrief = universes.filter((universe) => Boolean(universe.description?.trim())).length
+    const tagged = universes.filter((universe) => tagsFor(universe).length > 0).length
+
+    return {
+      count: universes.length,
+      withBrief,
+      tagged,
+    }
+  }, [universes])
+
+  const primaryUniverse = universes[0]
+
+  const closeCreate = () => {
+    setShowCreate(false)
+    setCreateError(null)
+    if (isForcingNew) navigate('/dashboard', { replace: true })
+  }
+
+  const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const name = newUniverseName.trim()
+    if (!name) {
+      setCreateError('Give your universe a name before creating it.')
       return
     }
-    // Automatically redirect if universes exist and we are not forcing create
-    if (!loading && universes.length > 0 && !showCreate) {
-      navigate(`/universe/${universes[0].id}`, { replace: true })
-    } else if (!loading && universes.length === 0) {
-      setShowCreate(true)
-    }
-  }, [loading, universes, showCreate, navigate, isForcingNew])
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!newUniverseName.trim()) return
-    setSubmitError(null)
+    const feedbackId = publish({
+      scope: 'home',
+      status: 'running',
+      message: 'Creating your universe…',
+    })
+    setCreateError(null)
+    setStatus({ tone: 'info', message: 'Creating your universe…' })
+    setIsCreating(true)
+
     try {
       const { universe } = await api.createUniverse({
-        name: newUniverseName,
-        description: newUniverseDesc,
+        name,
+        description: newUniverseDescription.trim(),
         genre_tags: newUniverseGenres,
       })
-      await fetchUniverses()
-      navigate(`/universe/${universe.id}`)
-    } catch (err) {
-      setSubmitError((err as Error).message || 'Failed to create')
+      const createdUniverse = universe as UniverseSummary
+      setUniverses((current) => [
+        createdUniverse,
+        ...current.filter((existing) => existing.id !== createdUniverse.id),
+      ])
+      setNewUniverseName('')
+      setNewUniverseDescription('')
+      setNewUniverseGenres([])
+      setShowCreate(false)
+      const message = `${createdUniverse.name} is ready. Continue writing when you are.`
+      setStatus({ tone: 'success', message })
+      update(feedbackId, { status: 'completed', message })
+    } catch (error) {
+      const message = errorMessage(error, 'We could not create that universe. Please try again.')
+      setCreateError(message)
+      setStatus({ tone: 'error', message })
+      update(feedbackId, { status: 'failed', message })
+    } finally {
+      setIsCreating(false)
     }
   }
 
-  if (loading || (!showCreate && universes.length > 0 && !isForcingNew)) {
-    return (
-      <div className={styles.layout}>
-        <div className={styles.loading}>Entering your universe...</div>
-      </div>
-    )
+  const handleDemo = async (action: DemoAction): Promise<boolean> => {
+    const isReset = action === 'reset'
+    const sessionId = guidedDemoSessionId()
+    const runningMessage = isReset ? 'Resetting the guided demo…' : 'Setting up the guided demo…'
+    const feedbackId = publish({ scope: 'demo', status: 'running', message: runningMessage })
+    setLastDemoAction(action)
+    setDemoError(null)
+    setDemoState(isReset ? 'resetting' : 'setting-up')
+    setStatus({ tone: 'info', message: runningMessage })
+
+    try {
+      const result = isReset
+        ? await api.demoReset(sessionId)
+        : await api.demoClone(sessionId)
+      setDemoUniverseId(result.universe_id)
+      rememberGuidedDemoUniverse(result.universe_id)
+      setDemoState('ready')
+      const message = isReset
+        ? 'The guided demo has been reset and is ready to explore again.'
+        : 'Your guided demo is ready. Start writing to begin the journey.'
+      setStatus({ tone: 'success', message })
+      update(feedbackId, { status: 'completed', message })
+      void loadUniverses(false)
+      return true
+    } catch (error) {
+      const message = errorMessage(
+        error,
+        isReset
+          ? 'We could not reset the guided demo. Please try again.'
+          : 'We could not set up the guided demo. Please try again.'
+      )
+      setDemoState('failed')
+      setDemoError(message)
+      setStatus({ tone: 'error', message })
+      update(feedbackId, { status: 'failed', message, retry: () => handleDemo(action) })
+      return false
+    }
   }
 
   return (
-    <div className={styles.layout}>
-      <div className={styles.createCard} style={{ margin: '0 auto', maxWidth: 460, marginTop: '10vh' }}>
-        <div className={styles.createHeader} style={{ marginBottom: 24, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
-          {isForcingNew && (
+    <main className={styles.layout}>
+      <section className={styles.hero} aria-labelledby="home-title">
+        <div>
+          <p className={styles.eyebrow}>Home</p>
+          <h1 id="home-title" className={styles.title}>Your writing worlds</h1>
+          <p className={styles.intro}>
+            Pick up a story, make a new home for an idea, or enter the guided demo.
+          </p>
+        </div>
+        <div className={styles.heroActions}>
+          {primaryUniverse && (
             <button
-              onClick={() => navigate(`/universe/${universes[0]?.id}`)}
-              style={{ position: 'absolute', left: 0, top: 0, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 24 }}
-              title="Cancel"
+              type="button"
+              className={styles.primaryButton}
+              onClick={() => navigate(writePath(primaryUniverse.id))}
             >
-              ×
+              Continue writing
+              <span className={styles.buttonDetail}>{primaryUniverse.name}</span>
             </button>
           )}
-          <div className={styles.createIcon} style={{ fontSize: 32, color: 'var(--teal)', marginBottom: 12 }}>✧</div>
-          <h2 className={styles.createTitle} style={{ fontFamily: 'var(--serif)', fontSize: 28, margin: '0 0 8px' }}>Create your first universe</h2>
-          <p className={styles.createSub} style={{ color: 'var(--muted)' }}>Give your new world a name and set its genre.</p>
+          {!showCreate && (
+            <button type="button" className={styles.secondaryButton} onClick={() => setShowCreate(true)}>
+              Create universe
+            </button>
+          )}
         </div>
-        <form className={styles.createForm} onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Name</label>
-            <input
-              className={styles.createInput}
-              style={{ padding: '12px 14px', borderRadius: 'var(--r-md)', border: '1px solid var(--line-strong)', background: 'var(--bg-input)', fontSize: 15, width: '100%' }}
-              placeholder="Universe Name (e.g. Cosmere)"
-              value={newUniverseName}
-              onChange={(e) => setNewUniverseName(e.target.value)}
-              autoFocus
-            />
-          </div>
+      </section>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Description</label>
-            <textarea
-              className={styles.createInput}
-              style={{ padding: '12px 14px', borderRadius: 'var(--r-md)', border: '1px solid var(--line-strong)', background: 'var(--bg-input)', fontSize: 14, resize: 'vertical', width: '100%' }}
-              placeholder="Brief description (optional)"
-              value={newUniverseDesc}
-              onChange={(e) => setNewUniverseDesc(e.target.value)}
-              rows={3}
-            />
-          </div>
+      {status && (
+        <p
+          className={`${styles.status} ${styles[`status${status.tone[0].toUpperCase()}${status.tone.slice(1)}`]}`}
+          role={status.tone === 'error' ? 'alert' : 'status'}
+        >
+          {status.message}
+        </p>
+      )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Genres</label>
-              <select
-                multiple
-                value={newUniverseGenres}
-                onChange={(e) => setNewUniverseGenres(selectedValues(e.currentTarget))}
-                style={{ padding: '12px 14px', borderRadius: 'var(--r-md)', border: '1px solid var(--line-strong)', background: 'var(--bg-input)', color: 'var(--ink)', fontSize: 14, width: '100%' }}
-              >
-                {GENRE_OPTIONS.map((g) => (
-                  <option key={g.value} value={g.value}>{g.label}</option>
-                ))}
-              </select>
-          </div>
-
-          {submitError && <div className={styles.errorText} style={{ color: 'var(--danger)', fontSize: 13, textAlign: 'center' }}>{submitError}</div>}
-          <div className={styles.createActions} style={{ marginTop: 8 }}>
-            <button type="submit" className={styles.createBtn} disabled={!newUniverseName.trim()} style={{ width: '100%', padding: '14px', background: 'var(--teal)', color: 'var(--parchment-hi)', border: 'none', borderRadius: 'var(--r-md)', fontWeight: 600, cursor: 'pointer' }}>
-              Create Universe
+      {showCreate && (
+        <section className={styles.createPanel} aria-labelledby="create-universe-title">
+          <div className={styles.panelHeading}>
+            <div>
+              <p className={styles.eyebrow}>New universe</p>
+              <h2 id="create-universe-title">Start with the shape of your story</h2>
+              <p>A name is enough to begin. Add a brief or genres when they help.</p>
+            </div>
+            <button type="button" className={styles.textButton} onClick={closeCreate} disabled={isCreating}>
+              Back to library
             </button>
           </div>
-        </form>
-      </div>
-    </div>
+
+          <form className={styles.createForm} onSubmit={handleCreate}>
+            <label className={styles.field} htmlFor="universe-name">
+              <span>Name</span>
+              <input
+                id="universe-name"
+                name="name"
+                placeholder="e.g. The Farthest Shore"
+                value={newUniverseName}
+                onChange={(event) => setNewUniverseName(event.target.value)}
+                autoFocus
+                disabled={isCreating}
+                required
+              />
+            </label>
+
+            <label className={styles.field} htmlFor="universe-description">
+              <span>Story brief <em>Optional</em></span>
+              <textarea
+                id="universe-description"
+                name="description"
+                placeholder="What makes this world worth returning to?"
+                value={newUniverseDescription}
+                onChange={(event) => setNewUniverseDescription(event.target.value)}
+                disabled={isCreating}
+                rows={3}
+              />
+            </label>
+
+            <GenreTagPicker
+              id="universe-genres"
+              label="Genres"
+              value={newUniverseGenres}
+              onChange={setNewUniverseGenres}
+              disabled={isCreating}
+            />
+
+            {createError && <p className={styles.formError} role="alert">{createError}</p>}
+
+            <div className={styles.formActions}>
+              <button type="submit" className={styles.primaryButton} disabled={isCreating || !newUniverseName.trim()}>
+                {isCreating ? 'Creating universe…' : createError ? 'Try again' : 'Create universe'}
+              </button>
+              <button type="button" className={styles.secondaryButton} onClick={closeCreate} disabled={isCreating}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
+
+      <section className={styles.overview} aria-labelledby="library-title">
+        <div className={styles.libraryHeading}>
+          <div>
+            <p className={styles.eyebrow}>Library</p>
+            <h2 id="library-title">Your universes</h2>
+          </div>
+          {!isLoading && !loadError && summary.count > 0 && (
+            <p className={styles.summary}>
+              {summary.count} {pluralize(summary.count, 'universe')} · {summary.withBrief} {pluralize(summary.withBrief, 'story brief', 'story briefs')} · {summary.tagged} tagged
+            </p>
+          )}
+        </div>
+
+        {loadError && (
+          <div className={styles.errorPanel} role="alert">
+            <div>
+              <h3>We could not load your library</h3>
+              <p>{loadError}</p>
+            </div>
+            <button type="button" className={styles.secondaryButton} onClick={() => void loadUniverses()}>
+              Retry
+            </button>
+          </div>
+        )}
+
+        {isLoading && universes.length === 0 && (
+          <div className={styles.skeletonGrid} role="status" aria-label="Loading your universe library" aria-busy="true">
+            <div className={styles.skeletonCard} />
+            <div className={styles.skeletonCard} />
+            <div className={styles.skeletonCard} />
+          </div>
+        )}
+
+        {!isLoading && universes.length === 0 && !loadError && (
+          <div className={styles.emptyState}>
+            <p className={styles.eyebrow}>A blank shelf</p>
+            <h3>No universes yet</h3>
+            <p>Create one when you are ready, or use the guided demo to see Quill with a working story.</p>
+            <button type="button" className={styles.primaryButton} onClick={() => setShowCreate(true)}>
+              Create your first universe
+            </button>
+          </div>
+        )}
+
+        {universes.length > 0 && (
+          <div className={styles.universeGrid}>
+            {universes.map((universe) => {
+              const tags = tagsFor(universe)
+              return (
+                <article className={styles.universeCard} key={universe.id}>
+                  <div className={styles.cardHeading}>
+                    <p className={styles.cardLabel}>Universe</p>
+                    <h3>{universe.name}</h3>
+                  </div>
+                  <p className={styles.description}>
+                    {universe.description?.trim() || 'No story brief yet — begin where the idea is clearest.'}
+                  </p>
+                  <div className={styles.genreList} aria-label={`Genres for ${universe.name}`}>
+                    {tags.length > 0 ? tags.map((tag) => <span className={styles.genreTag} key={tag}>{genreName(tag)}</span>) : (
+                      <span className={styles.noGenre}>No genres tagged</span>
+                    )}
+                  </div>
+                  <div className={styles.cardFooter}>
+                    <span className={styles.cardSignal}>
+                      {universe.description?.trim() ? 'Story brief added' : 'Story brief open'}
+                    </span>
+                    <button type="button" className={styles.cardButton} onClick={() => navigate(writePath(universe.id))}>
+                      Open writing
+                    </button>
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+        )}
+      </section>
+
+      <aside className={styles.demoCard} aria-labelledby="guided-demo-title">
+        <div>
+          <p className={styles.eyebrow}>Guided demo</p>
+          <h2 id="guided-demo-title">See a living story world</h2>
+          <p>
+            This uses a real universe owned by your signed-in account. Each step stays pending until Quill observes it.
+          </p>
+          <ol className={styles.demoSteps}>
+            <li>Clone or reset your demo universe.</li>
+            <li>Open a chapter in Write.</li>
+            <li>Submit a paragraph and wait for real analysis.</li>
+            <li>Open the relationship map.</li>
+            <li>Ask Memory a lore question.</li>
+            <li>Inspect a real review issue.</li>
+          </ol>
+        </div>
+        <div className={styles.demoActions}>
+          {demoState === 'idle' && (
+            <button type="button" className={styles.primaryButton} onClick={() => void handleDemo('clone')}>
+              Clone demo universe
+            </button>
+          )}
+          {(demoState === 'setting-up' || demoState === 'resetting') && (
+            <span className={styles.demoProgress} role="status">
+              {demoState === 'resetting' ? 'Resetting demo…' : 'Setting up demo…'}
+            </span>
+          )}
+          {demoState === 'ready' && demoUniverseId && (
+            <>
+              <button type="button" className={styles.primaryButton} onClick={() => navigate(writePath(demoUniverseId))}>
+                Start guided demo
+              </button>
+              <button type="button" className={styles.secondaryButton} onClick={() => void handleDemo('reset')}>
+                Reset demo
+              </button>
+            </>
+          )}
+          {demoState === 'failed' && (
+            <>
+              {demoError && <p className={styles.demoError} role="alert">{demoError}</p>}
+              <button type="button" className={styles.secondaryButton} onClick={() => void handleDemo(lastDemoAction)}>
+                Try again
+              </button>
+            </>
+          )}
+        </div>
+      </aside>
+    </main>
   )
 }

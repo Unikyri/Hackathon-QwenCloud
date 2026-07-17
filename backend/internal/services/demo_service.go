@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -11,6 +12,13 @@ import (
 	"github.com/pgvector/pgvector-go"
 
 	"github.com/quill/backend/internal/repositories"
+)
+
+var (
+	ErrDemoAuthenticationRequired = errors.New("authentication required")
+	ErrDemoSessionRequired        = errors.New("demo session ID is required")
+	ErrDemoSessionInvalid         = errors.New("demo session ID must be an opaque UUID")
+	ErrDemoUniverseNotFound       = errors.New("demo universe not found")
 )
 
 type DemoService struct {
@@ -27,18 +35,38 @@ func NewDemoService(pool *pgxpool.Pool, universeRepo *repositories.UniverseRepo,
 	}
 }
 
-func (s *DemoService) CloneUniverse(ctx context.Context, sessionID string) (string, error) {
-	// Check if user already has a demo universe for this session
-	existing, err := s.universeRepo.FindBySessionID(ctx, sessionID)
-	if err == nil && existing != nil {
+func (s *DemoService) CloneUniverse(ctx context.Context, userID uuid.UUID, sessionID string) (string, error) {
+	if userID == uuid.Nil {
+		return "", ErrDemoAuthenticationRequired
+	}
+	if err := validateDemoSessionID(sessionID); err != nil {
+		return "", err
+	}
+
+	// A session identifier is browser-scoped, not an authorization boundary.
+	// Reuse only a clone owned by the initiating authenticated user.
+	existing, err := s.universeRepo.FindByUserAndSessionID(ctx, userID, sessionID)
+	if err != nil {
+		return "", fmt.Errorf("find existing demo universe: %w", err)
+	}
+	if existing != nil {
 		return existing.ID.String(), nil
 	}
 
+	newID := uuid.NewString()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	committed := false
+	defer func() {
+		_ = tx.Rollback(ctx)
+		if !committed && s.graphRepo != nil {
+			if err := s.graphRepo.DropGraph(ctx, "universe_"+newID); err != nil {
+				log.Printf("[demo] cleanup failed clone graph %s: %v", newID, err)
+			}
+		}
+	}()
 
 	// Get template universe
 	templateID := ""
@@ -48,12 +76,11 @@ func (s *DemoService) CloneUniverse(ctx context.Context, sessionID string) (stri
 	}
 
 	// Clone the universe
-	newID := uuid.New().String()
 	_, err = tx.Exec(ctx, `
 		INSERT INTO universes (id, user_id, name, description, genre_tags, session_id, is_demo_template, created_at, updated_at)
-		SELECT $1, user_id, name, description, genre_tags, $2, FALSE, NOW(), NOW()
-		FROM universes WHERE id = $3
-	`, newID, sessionID, templateID)
+		SELECT $1, $2, name, description, genre_tags, $3, FALSE, NOW(), NOW()
+		FROM universes WHERE id = $4
+	`, newID, userID, sessionID, templateID)
 	if err != nil {
 		return "", fmt.Errorf("clone universe: %w", err)
 	}
@@ -490,38 +517,139 @@ func (s *DemoService) CloneUniverse(ctx context.Context, sessionID string) (stri
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit: %w", err)
 	}
+	committed = true
 
 	return newID, nil
 }
 
-// reset / re-clone: delete then deep-copy (uses the expanded CloneUniverse above)
-func (s *DemoService) ResetUniverse(ctx context.Context, sessionID string) (string, error) {
-	u, err := s.universeRepo.FindBySessionID(ctx, sessionID)
+// ResetUniverse creates a replacement clone before retiring the old one. The
+// old universe remains usable if the deep copy or AGE graph clone fails.
+func (s *DemoService) ResetUniverse(ctx context.Context, userID uuid.UUID, sessionID string) (string, error) {
+	if userID == uuid.Nil {
+		return "", ErrDemoAuthenticationRequired
+	}
+	if err := validateDemoSessionID(sessionID); err != nil {
+		return "", err
+	}
+
+	u, err := s.universeRepo.FindByUserAndSessionID(ctx, userID, sessionID)
 	if err != nil {
-		return "", fmt.Errorf("universe not found for session")
+		return "", fmt.Errorf("find demo universe for reset: %w", err)
+	}
+	if u == nil {
+		return "", ErrDemoUniverseNotFound
+	}
+
+	// Clone under a temporary, opaque session ID so CloneUniverse's idempotency
+	// check cannot return the still-live old clone. If this fails, no mutation
+	// has been made to the old universe or its graph.
+	replacementSessionID := uuid.NewString()
+	replacementID, err := s.CloneUniverse(ctx, userID, replacementSessionID)
+	if err != nil {
+		return "", fmt.Errorf("clone replacement demo universe: %w", err)
+	}
+	replacementUUID, err := uuid.Parse(replacementID)
+	if err != nil {
+		return "", fmt.Errorf("parse replacement universe ID: %w", err)
 	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		s.discardDemoClone(ctx, userID, replacementUUID)
 		return "", fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	abortReplacement := func() {
+		_ = tx.Rollback(ctx)
+		s.discardDemoClone(ctx, userID, replacementUUID)
+	}
 
-	// Delete the session's universe (CASCADE removes all dependent rows)
-	_, err = tx.Exec(ctx, `DELETE FROM universes WHERE id = $1`, u.ID)
+	// Lock the current owner/session row before replacement. A concurrent reset
+	// then observes that the old row is gone and cleans up only its own temp
+	// clone, never another visitor's universe.
+	var oldID uuid.UUID
+	err = tx.QueryRow(ctx, `
+		SELECT id FROM universes
+		WHERE id = $1 AND user_id = $2 AND session_id = $3
+		FOR UPDATE`, u.ID, userID, sessionID).Scan(&oldID)
 	if err != nil {
+		abortReplacement()
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrDemoUniverseNotFound
+		}
+		return "", fmt.Errorf("lock demo universe for reset: %w", err)
+	}
+
+	result, err := tx.Exec(ctx, `
+		UPDATE universes
+		SET session_id = $1, updated_at = NOW()
+		WHERE id = $2 AND user_id = $3 AND session_id = $4`,
+		sessionID, replacementUUID, userID, replacementSessionID)
+	if err != nil {
+		abortReplacement()
+		return "", fmt.Errorf("activate replacement demo universe: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		abortReplacement()
+		return "", ErrDemoUniverseNotFound
+	}
+
+	// The replacement is complete before the old clone is removed. Cascades
+	// clean its relational data; its AGE graph is dropped after commit.
+	result, err = tx.Exec(ctx, `DELETE FROM universes WHERE id = $1 AND user_id = $2 AND session_id = $3`, oldID, userID, sessionID)
+	if err != nil {
+		abortReplacement()
 		return "", fmt.Errorf("delete universe: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		abortReplacement()
+		return "", ErrDemoUniverseNotFound
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit: %w", err)
 	}
 
-	// Re-clone with full deep-copy
-	return s.CloneUniverse(ctx, sessionID)
+	if s.graphRepo != nil {
+		if err := s.graphRepo.DropGraph(ctx, "universe_"+oldID.String()); err != nil {
+			// The replacement is durable and owner-scoped. Keep reset successful
+			// while surfacing an operational cleanup failure for follow-up.
+			log.Printf("[demo] cleanup obsolete graph %s: %v", oldID, err)
+		}
+	}
+
+	return replacementID, nil
 }
 
 // ── Helpers ──
+
+func validateDemoSessionID(sessionID string) error {
+	if sessionID == "" {
+		return ErrDemoSessionRequired
+	}
+	parsed, err := uuid.Parse(sessionID)
+	if err != nil || parsed == uuid.Nil {
+		return ErrDemoSessionInvalid
+	}
+	return nil
+}
+
+func (s *DemoService) discardDemoClone(ctx context.Context, userID, universeID uuid.UUID) {
+	result, err := s.pool.Exec(ctx, `DELETE FROM universes WHERE id = $1 AND user_id = $2`, universeID, userID)
+	if err != nil {
+		log.Printf("[demo] cleanup replacement universe %s: %v", universeID, err)
+		return
+	}
+	if result.RowsAffected() != 1 {
+		log.Printf("[demo] cleanup replacement universe %s: row not found", universeID)
+		return
+	}
+	if s.graphRepo != nil {
+		if err := s.graphRepo.DropGraph(ctx, "universe_"+universeID.String()); err != nil {
+			log.Printf("[demo] cleanup replacement graph %s: %v", universeID, err)
+		}
+	}
+}
 
 // remapUUIDs replaces each UUID in ids using the given mapping.
 func remapUUIDs(ids []string, m map[string]string) []string {

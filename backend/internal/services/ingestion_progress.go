@@ -20,7 +20,7 @@ func (t realIngestionTicker) C() <-chan time.Time { return t.Ticker.C }
 
 type ingestionProgressTracker struct {
 	svc                                     *IngestionService
-	jobID, userID                           uuid.UUID
+	jobID, userID, universeID               uuid.UUID
 	chaptersTotal                           int
 	now                                     func() time.Time
 	newTicker                               func(time.Duration) ingestionTicker
@@ -35,7 +35,7 @@ type ingestionProgressTracker struct {
 	wg                                      sync.WaitGroup
 }
 
-func newIngestionProgressTracker(svc *IngestionService, jobID, userID uuid.UUID, total int) *ingestionProgressTracker {
+func newIngestionProgressTracker(svc *IngestionService, jobID, userID, universeID uuid.UUID, total int) *ingestionProgressTracker {
 	now := svc.progressNow
 	if now == nil {
 		now = time.Now
@@ -44,7 +44,7 @@ func newIngestionProgressTracker(svc *IngestionService, jobID, userID uuid.UUID,
 	if newTicker == nil {
 		newTicker = func(d time.Duration) ingestionTicker { return realIngestionTicker{time.NewTicker(d)} }
 	}
-	return &ingestionProgressTracker{svc: svc, jobID: jobID, userID: userID, chaptersTotal: total, now: now, newTicker: newTicker, status: "running", action: "Preparing document…", lastAt: now(), done: make(chan struct{})}
+	return &ingestionProgressTracker{svc: svc, jobID: jobID, userID: userID, universeID: universeID, chaptersTotal: total, now: now, newTicker: newTicker, status: "running", action: "Preparing document…", lastAt: now(), done: make(chan struct{})}
 }
 
 func (p *ingestionProgressTracker) start() {
@@ -142,5 +142,5 @@ func (p *ingestionProgressTracker) publish() {
 	dbProcessed, dbTotal := p.reduceProcessed, p.chaptersTotal
 	p.mu.Unlock()
 	p.svc.updateProgress(context.Background(), p.jobID, dbTotal, dbProcessed, entities)
-	p.svc.emitProgressDetails(p.jobID, p.userID, status, processed, total, action, eta)
+	p.svc.emitProgressDetails(p.jobID, p.userID, p.universeID, status, processed, total, action, eta)
 }

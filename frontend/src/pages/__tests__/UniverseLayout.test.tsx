@@ -1,255 +1,228 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import UniverseLayout from '../UniverseLayout'
 
-// CSS module mock
-vi.mock('../UniverseLayout.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
+vi.mock('../UniverseLayout.module.css', () => ({ default: new Proxy({}, { get: (_, key) => key }) }))
 
-// Mock api
 const mockGetUniverse = vi.fn()
 const mockListWorks = vi.fn()
-const mockListEntities = vi.fn()
-const mockGetContradictions = vi.fn()
-const mockGetPlotHoles = vi.fn()
 const mockUpdateUniverse = vi.fn()
-const mockDeleteUniverse = vi.fn()
-const mockCreateUniverse = vi.fn()
-
 vi.mock('../../lib/api', () => ({
   api: {
     getUniverse: (...args: unknown[]) => mockGetUniverse(...args),
     listWorks: (...args: unknown[]) => mockListWorks(...args),
-    listEntities: (...args: unknown[]) => mockListEntities(...args),
-    getContradictions: (...args: unknown[]) => mockGetContradictions(...args),
-    getPlotHoles: (...args: unknown[]) => mockGetPlotHoles(...args),
     updateUniverse: (...args: unknown[]) => mockUpdateUniverse(...args),
-    deleteUniverse: (...args: unknown[]) => mockDeleteUniverse(...args),
-    createUniverse: (...args: unknown[]) => mockCreateUniverse(...args),
   },
 }))
 
 const mockFetchUniverses = vi.fn()
 let universeStoreState = {
   universes: [
-    { id: 'uni-1', name: 'Middle Earth', genre: 'Fantasy', format: 'Novel Series' },
-    { id: 'uni-2', name: 'Second World', genre: 'Sci-Fi', format: 'Novel' },
+    { id: 'uni-1', name: 'Middle Earth' },
+    { id: 'uni-2', name: 'Second World' },
   ],
   fetchUniverses: mockFetchUniverses,
 }
 vi.mock('../../stores/universeStore', () => ({
   useUniverseStore: vi.fn((selector?: (state: typeof universeStoreState) => unknown) =>
-    selector ? selector(universeStoreState) : universeStoreState
+    selector ? selector(universeStoreState) : universeStoreState,
   ),
 }))
 
 const mockLogout = vi.fn()
-const authStoreState = {
-  user: { id: 'u1', email: 'writer@example.com', display_name: 'Author Name' },
-  logout: mockLogout,
-}
 vi.mock('../../stores/authStore', () => ({
-  useAuthStore: vi.fn((selector?: (state: typeof authStoreState) => unknown) =>
-    selector ? selector(authStoreState) : authStoreState
-  ),
+  useAuthStore: vi.fn((selector?: (state: { user: { display_name: string; email: string }; logout: () => void }) => unknown) => {
+    const state = { user: { display_name: 'Author Name', email: 'writer@example.com' }, logout: mockLogout }
+    return selector ? selector(state) : state
+  }),
 }))
+
+const mockSetUniverseScope = vi.fn()
+let wsStoreState = {
+  status: 'open',
+  lastError: null as string | null,
+  submissions: {},
+  setUniverseScope: mockSetUniverseScope,
+}
+vi.mock('../../stores/wsStore', () => ({
+  useWSStore: vi.fn((selector: (state: typeof wsStoreState) => unknown) => selector(wsStoreState)),
+}))
+vi.mock('../../hooks/useWS', () => ({ useWS: () => ({ status: wsStoreState.status }) }))
+const mockFeedbackPublish = vi.fn(() => 'feedback-id')
+const mockFeedbackUpdate = vi.fn()
+vi.mock('../../components/feedback', () => ({ useFeedback: () => ({ publish: mockFeedbackPublish, update: mockFeedbackUpdate }) }))
 
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  }
+  return { ...actual, useNavigate: () => mockNavigate }
 })
 
-// Simple child tab for testing
-function WorksTab() {
-  return <div>Works Content</div>
-}
-function GraphTab() {
-  return <div>Graph Content</div>
+function Content({ label }: { label: string }) {
+  return <div>{label}</div>
 }
 
-function renderLayout(initialRoute = '/universe/uni-1/works') {
+function renderLayout(initialRoute = '/universe/uni-1/write') {
   return render(
     <MemoryRouter initialEntries={[initialRoute]}>
       <Routes>
         <Route path="/universe/:universeId" element={<UniverseLayout />}>
-          <Route path="works" element={<WorksTab />} />
-          <Route path="graph" element={<GraphTab />} />
+          <Route path="write" element={<Content label="Write content" />} />
+          <Route path="explore/entities" element={<Content label="Explore content" />} />
+          <Route path="explore/map" element={<Content label="Map content" />} />
+          <Route path="memory" element={<Content label="Memory content" />} />
+          <Route path="review/issues" element={<Content label="Review content" />} />
         </Route>
       </Routes>
-    </MemoryRouter>
+    </MemoryRouter>,
   )
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  localStorage.clear()
+  sessionStorage.clear()
   universeStoreState = {
     universes: [
-      { id: 'uni-1', name: 'Middle Earth', genre: 'Fantasy', format: 'Novel Series' },
-      { id: 'uni-2', name: 'Second World', genre: 'Sci-Fi', format: 'Novel' },
+      { id: 'uni-1', name: 'Middle Earth' },
+      { id: 'uni-2', name: 'Second World' },
     ],
     fetchUniverses: mockFetchUniverses,
   }
-  mockGetUniverse.mockResolvedValue({
-    universe: { id: 'uni-1', name: 'Middle Earth', genre: 'Fantasy', format: 'Novel Series' },
-  })
-  mockListWorks.mockResolvedValue({
-    works: [{ id: 'w1', title: 'The Hobbit', type: 'novel', order_index: 1 }],
-  })
-  mockListEntities.mockResolvedValue({
-    entities: [],
-    pagination: { page: 1, limit: 1, total: 12, total_pages: 12 },
-  })
-  mockGetContradictions.mockResolvedValue({ contradictions: [] })
-  mockGetPlotHoles.mockResolvedValue({ plot_holes: [] })
-  vi.stubGlobal('confirm', vi.fn(() => true))
+  wsStoreState = { status: 'open', lastError: null, submissions: {}, setUniverseScope: mockSetUniverseScope }
+  mockGetUniverse.mockResolvedValue({ universe: { id: 'uni-1', name: 'Middle Earth' } })
+  mockListWorks.mockResolvedValue({ works: [{ id: 'work-1', title: 'A Work' }] })
+  mockUpdateUniverse.mockResolvedValue({ universe: { id: 'uni-1', name: 'Middle Earth', genre_tags: [] } })
 })
 
 describe('UniverseLayout', () => {
-  it('shows loading state while fetching', () => {
-    mockGetUniverse.mockReturnValue(new Promise(() => {}))
-    mockListWorks.mockReturnValue(new Promise(() => {}))
-    renderLayout()
-    expect(screen.getByText('Loading universe…')).toBeInTheDocument()
-  })
-
-  it('renders universe switcher card and all 9 nested shell nav items after load', async () => {
+  it('renders a five-destination application bar and a skip-link target', async () => {
     renderLayout()
 
-    await waitFor(() => {
-      expect(screen.getAllByText('Middle Earth').length).toBeGreaterThanOrEqual(1)
-    })
+    await waitFor(() => expect(screen.getByText('Write content')).toBeInTheDocument())
 
-    expect(screen.getByText('Fantasy · 12 entities')).toBeInTheDocument()
-    expect(screen.getByText('Panorama')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Works & Chapters/ })).toBeInTheDocument()
-    expect(screen.getByText('Editor')).toBeInTheDocument()
-    expect(screen.getByText('Entities')).toBeInTheDocument()
-    expect(screen.getByText('Graph')).toBeInTheDocument()
-    expect(screen.getByText('Timeline')).toBeInTheDocument()
-    expect(screen.getByText('Contradictions')).toBeInTheDocument()
-    expect(screen.getByText('Plot Holes')).toBeInTheDocument()
-    expect(screen.getByText('Ingestion')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/dashboard')
+    expect(screen.getByRole('link', { name: 'Write' })).toHaveAttribute('href', '/universe/uni-1/write')
+    expect(screen.getByRole('link', { name: 'Explore' })).toHaveAttribute('href', '/universe/uni-1/explore/entities')
+    expect(screen.getByRole('link', { name: 'Memory' })).toHaveAttribute('href', '/universe/uni-1/memory')
+    expect(screen.getByRole('link', { name: 'Review' })).toHaveAttribute('href', '/universe/uni-1/review/issues')
+    expect(screen.queryByText('Works & Chapters')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Skip to content' })).toHaveAttribute('href', '#universe-main')
+    expect(document.getElementById('universe-main')).toHaveAttribute('tabindex', '-1')
   })
 
-  it('renders default Works tab content', async () => {
-    renderLayout('/universe/uni-1/works')
-
-    await waitFor(() => {
-      expect(screen.getByText('Works Content')).toBeInTheDocument()
-    })
-  })
-
-  it('navigates to Graph tab on click', async () => {
-    const user = userEvent.setup()
-    renderLayout('/universe/uni-1/works')
-
-    await waitFor(() => {
-      expect(screen.getByText('Graph')).toBeInTheDocument()
-    })
-
-    await user.click(screen.getByText('Graph'))
-
-    await waitFor(() => {
-      expect(screen.getByText('Graph Content')).toBeInTheDocument()
-    })
-    expect(screen.queryByText('Works Content')).not.toBeInTheDocument()
-  })
-
-  it('shows error state when API fails', async () => {
-    mockGetUniverse.mockRejectedValue(new Error('Not found'))
-    mockListWorks.mockRejectedValue(new Error('Not found'))
+  it('uses real WebSocket state for the persistent status', async () => {
+    wsStoreState = {
+      ...wsStoreState,
+      submissions: {
+        'submission-1': { submissionId: 'submission-1', paragraphRef: 'p-1', universeId: 'uni-1', phase: 'analyzing' },
+      },
+    }
     renderLayout()
 
-    await waitFor(() => {
-      expect(screen.getByText(/Failed to load universe/)).toBeInTheDocument()
-      expect(screen.getByText(/Not found/)).toBeInTheDocument()
-    })
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Analyzing 1 paragraph'))
+    expect(screen.queryByText(/autosave/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Qwen health/i)).not.toBeInTheDocument()
   })
 
-  it('clicking the universe switcher opens a popover listing universes, and clicking a row navigates there', async () => {
+  it('switches universes into the canonical Write entry route', async () => {
     const user = userEvent.setup()
     renderLayout()
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Middle Earth/ })).toBeInTheDocument()
-    })
+    await waitFor(() => expect(screen.getByRole('button', { name: /Switch universe, current universe Middle Earth/ })).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /Switch universe, current universe Middle Earth/ }))
+    await user.click(screen.getByRole('menuitem', { name: 'Second World' }))
 
-    await user.click(screen.getByRole('button', { name: /Middle Earth/ }))
-
-    expect(screen.getByText('Second World')).toBeInTheDocument()
-    expect(screen.getByText(/Create New Universe/)).toBeInTheDocument()
-
-    await user.click(screen.getByText('Second World'))
-    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-2')
+    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-2/write')
+    expect(mockSetUniverseScope).toHaveBeenCalledWith('uni-1')
   })
 
-  it('clicking Edit on a universe row opens the edit modal pre-filled with its name', async () => {
+  it('edits universe genres with the exact optional genre_tags payload', async () => {
+    mockGetUniverse.mockResolvedValue({ universe: { id: 'uni-1', name: 'Middle Earth', genre_tags: ['fantasy'] } })
     const user = userEvent.setup()
     renderLayout()
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Middle Earth/ })).toBeInTheDocument()
-    })
-    await user.click(screen.getByRole('button', { name: /Middle Earth/ }))
-    await user.click(screen.getAllByTitle('Edit Universe')[0])
+    await user.click(await screen.findByRole('button', { name: /Switch universe, current universe Middle Earth/ }))
+    await user.click(screen.getByRole('menuitem', { name: 'Edit genres' }))
 
-    expect(screen.getByText('Edit Universe')).toBeInTheDocument()
-    expect(screen.getByDisplayValue('Middle Earth')).toBeInTheDocument()
+    const dialog = screen.getByRole('dialog', { name: 'Edit genres for Middle Earth' })
+    await user.click(within(dialog).getByRole('button', { name: 'Remove Fantasy' }))
+    expect(within(dialog).getByText('No genres selected. Genres are optional.')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Save genres' }))
+
+    await waitFor(() => expect(mockUpdateUniverse).toHaveBeenCalledWith('uni-1', { genre_tags: [] }))
+    expect(mockFeedbackUpdate).toHaveBeenCalledWith('feedback-id', expect.objectContaining({ status: 'completed' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('clicking Delete on the current universe confirms, deletes, and navigates to the dashboard', async () => {
+  it('keeps a failed genre save visible and retryable', async () => {
+    mockUpdateUniverse.mockRejectedValueOnce(new Error('forbidden'))
     const user = userEvent.setup()
     renderLayout()
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Middle Earth/ })).toBeInTheDocument()
-    })
-    await user.click(screen.getByRole('button', { name: /Middle Earth/ }))
-    await user.click(screen.getAllByTitle('Delete Universe')[0])
+    await user.click(await screen.findByRole('button', { name: /Switch universe, current universe Middle Earth/ }))
+    await user.click(screen.getByRole('menuitem', { name: 'Edit genres' }))
+    const dialog = screen.getByRole('dialog', { name: 'Edit genres for Middle Earth' })
+    await user.click(within(dialog).getByRole('button', { name: 'Save genres' }))
 
-    await waitFor(() => {
-      expect(mockDeleteUniverse).toHaveBeenCalledWith('uni-1')
-    })
-    expect(mockNavigate).toHaveBeenCalledWith('/dashboard')
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('forbidden')
+    expect(mockFeedbackUpdate).toHaveBeenCalledWith('feedback-id', expect.objectContaining({ status: 'failed' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Try again' }))
+
+    await waitFor(() => expect(mockUpdateUniverse).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('shows the current user in the sidebar footer and signs out on click', async () => {
-    const user = userEvent.setup()
+  it('keeps the guided-demo journey pending until real activity is observed', async () => {
+    localStorage.setItem('quill-guided-demo-universe-id', 'uni-1')
+    wsStoreState = {
+      ...wsStoreState,
+      submissions: {
+        'submission-1': { submissionId: 'submission-1', paragraphRef: 'p-1', universeId: 'uni-1', phase: 'done' },
+      },
+    }
     renderLayout()
 
-    await waitFor(() => {
-      expect(screen.getByText('Author Name')).toBeInTheDocument()
-    })
-    expect(screen.getByText('writer@example.com')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: /Sign out/i }))
-    expect(mockLogout).toHaveBeenCalled()
+    expect(await screen.findByRole('heading', { name: 'Six steps, only real progress' })).toBeInTheDocument()
+    expect(await screen.findByText('3 verified steps')).toBeInTheDocument()
+    expect(screen.getByText('A completed analysis result has been observed for this demo.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open map' })).toHaveAttribute('href', '/universe/uni-1/explore/map')
+    expect(screen.getByRole('link', { name: 'Open Memory' })).toHaveAttribute('href', '/universe/uni-1/memory')
+    expect(screen.getByRole('link', { name: 'Open Review' })).toHaveAttribute('href', '/universe/uni-1/review/issues')
+    expect(screen.getByText('Ask Memory a lore question')).toBeInTheDocument()
+    expect(screen.getByText('Review a real issue')).toBeInTheDocument()
   })
 
-  it('collapses the sidebar and reveals a menu toggle in the header', async () => {
+  it('records the map step only after the demo route is actually opened', async () => {
+    localStorage.setItem('quill-guided-demo-universe-id', 'uni-1')
+    renderLayout('/universe/uni-1/explore/map')
+
+    expect(await screen.findByText('2 verified steps')).toBeInTheDocument()
+    expect(screen.getByText('The relationship map has been opened.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open Write' })).toHaveAttribute('href', '/universe/uni-1/write')
+    expect(screen.getByText('Ask Memory a lore question')).toBeInTheDocument()
+  })
+
+  it('supports Alt+number navigation without intercepting editor typing', async () => {
+    renderLayout()
+    await waitFor(() => expect(screen.getByText('Write content')).toBeInTheDocument())
+
+    fireEvent.keyDown(window, { key: '3', altKey: true })
+    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-1/explore/entities')
+  })
+
+  it('retries the actual universe and work requests after a load failure', async () => {
     const user = userEvent.setup()
+    mockGetUniverse.mockRejectedValueOnce(new Error('Not found'))
+    mockListWorks.mockRejectedValueOnce(new Error('Not found'))
     renderLayout()
 
-    await waitFor(() => {
-      expect(screen.getByRole('link', { name: /Works & Chapters/ })).toBeInTheDocument()
-    })
-
-    await user.click(screen.getByRole('button', { name: /Hide sidebar/i }))
-
-    expect(screen.queryByRole('link', { name: /Works & Chapters/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Show sidebar/i })).toBeInTheDocument()
-  })
-
-  it('shows the active tab title and a recall search stub in the header', async () => {
-    renderLayout('/universe/uni-1/works')
-
-    await waitFor(() => {
-      expect(screen.getByText('Recall from the universe…')).toBeInTheDocument()
-    })
+    await waitFor(() => expect(screen.getByText(/Failed to load universe: Not found/)).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(mockGetUniverse).toHaveBeenCalledTimes(2))
+    expect(mockListWorks).toHaveBeenCalledTimes(2)
+    expect(await screen.findByText('Write content')).toBeInTheDocument()
   })
 })

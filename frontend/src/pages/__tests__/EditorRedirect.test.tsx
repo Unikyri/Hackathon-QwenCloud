@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import EditorRedirect from '../EditorRedirect'
 
@@ -9,7 +9,7 @@ vi.mock('../../lib/api', () => ({
 }))
 
 function Target() {
-  return <div>Nested editor screen</div>
+  return <div>Canonical write screen</div>
 }
 
 function Dashboard() {
@@ -21,7 +21,7 @@ function renderRedirect(chapterId = 'ch-1') {
     <MemoryRouter initialEntries={[`/editor/${chapterId}`]}>
       <Routes>
         <Route path="/editor/:chapterId" element={<EditorRedirect />} />
-        <Route path="/universe/:universeId/editor/:chapterId" element={<Target />} />
+        <Route path="/universe/:universeId/write/:chapterId" element={<Target />} />
         <Route path="/dashboard" element={<Dashboard />} />
       </Routes>
     </MemoryRouter>
@@ -31,21 +31,26 @@ function renderRedirect(chapterId = 'ch-1') {
 describe('EditorRedirect', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('redirects to the nested universe-scoped editor route once the chapter resolves', async () => {
+  it('redirects to the canonical universe-scoped Write route once the chapter resolves', async () => {
     mockGetChapter.mockResolvedValue({ chapter: { id: 'ch-1', universe_id: 'uni-1' } })
     renderRedirect('ch-1')
 
     await waitFor(() => {
-      expect(screen.getByText('Nested editor screen')).toBeInTheDocument()
+      expect(screen.getByText('Canonical write screen')).toBeInTheDocument()
     })
   })
 
-  it('redirects to /dashboard when the chapter fetch fails', async () => {
-    mockGetChapter.mockRejectedValue(new Error('not found'))
+  it('keeps the legacy link visible with an accessible retry when the chapter fetch fails', async () => {
+    mockGetChapter
+      .mockRejectedValueOnce(new Error('not found'))
+      .mockResolvedValueOnce({ chapter: { id: 'ch-1', universe_id: 'uni-1' } })
     renderRedirect('ch-1')
 
-    await waitFor(() => {
-      expect(screen.getByText('Dashboard screen')).toBeInTheDocument()
-    })
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not open this chapter.')
+    expect(screen.queryByText('Dashboard screen')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(screen.getByText('Canonical write screen')).toBeInTheDocument())
   })
 })

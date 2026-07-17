@@ -80,8 +80,13 @@ export default function WriterMemoryPanel({ universeId }: Props) {
       <p className={styles.intro}>
         Quill starts with observations about your prose, then promotes a preference only after your explicit accept, reject, or bounded revision behaviour. Silence is never treated as a rejection.
       </p>
-      {loading && <p className={styles.state}>Reading your evidence trail…</p>}
-      {error && <p className={`${styles.state} ${styles.error}`}>{error}</p>}
+      {loading && <p className={styles.state} role="status" aria-live="polite">Reading your evidence trail…</p>}
+      {error && (
+        <div className={`${styles.state} ${styles.error}`} role="alert">
+          <p>{error}</p>
+          <button className={styles.retryButton} type="button" onClick={() => void load()}>Retry</button>
+        </div>
+      )}
       {!loading && !error && (
         <section className={styles.observations} aria-labelledby="writer-observations-title">
           <div className={styles.subheading}>

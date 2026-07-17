@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
+import { createOpaqueDemoId, guidedDemoSessionId } from '../pages/guidedDemo'
 
 interface User {
   id: string
@@ -18,7 +19,17 @@ interface AuthState {
   init: () => Promise<void>
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+function demoRegistration() {
+  const identity = createOpaqueDemoId()
+
+  return {
+    email: `demo-${identity}@example.invalid`,
+    password: `${createOpaqueDemoId()}-${identity}`,
+    display_name: 'Demo Visitor',
+  }
+}
+
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: localStorage.getItem('token'),
   isAuthenticated: !!localStorage.getItem('token'),
@@ -36,12 +47,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   demoLogin: async () => {
-    // ponytail: sequential — login first, then clone with session token
-    const { token } = await api.login({ email: 'demo@quill.ai', password: 'demo1234' })
+    const sessionId = guidedDemoSessionId()
+    if (get().isAuthenticated) {
+      const { universe_id } = await api.demoClone(sessionId)
+      return universe_id
+    }
+
+    const { user, token } = await api.register(demoRegistration())
     localStorage.setItem('token', token)
-    const me = await api.me()
-    set({ user: me.user, token, isAuthenticated: true })
-    const { universe_id } = await api.demoClone(token)
+    set({ user, token, isAuthenticated: true })
+    const { universe_id } = await api.demoClone(sessionId)
     return universe_id
   },
 

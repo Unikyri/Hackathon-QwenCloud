@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { useFeedback } from '../components/feedback'
 import { useEditorStore } from '../stores/editorStore'
 import { useWSStore } from '../stores/wsStore'
 import { useWS } from '../hooks/useWS'
@@ -10,6 +11,8 @@ import CraftReviewPanel from '../components/editor/CraftReviewPanel'
 import EntityCandidateTray from '../components/editor/EntityCandidateTray'
 import type { CandidateHighlightEntity } from '../components/editor/candidateHighlightExtension'
 import ContextPanel from '../components/context-panel/ContextPanel'
+import { IngestPanel } from './IngestPage'
+import { writeImportPath, writePath } from './writeRoutes'
 import styles from './EditorPage.module.css'
 
 interface Chapter {
@@ -32,14 +35,15 @@ interface StoredPanelState {
   contextCollapsed?: boolean
   railWidth?: number
   contextWidth?: number
+  preferenceError?: boolean
 }
 
 function readPanelState(): StoredPanelState {
   if (typeof window === 'undefined') return {}
   try {
     return JSON.parse(window.localStorage.getItem(PANEL_STORAGE_KEY) || '{}') as StoredPanelState
-  } catch {
-    return {}
+  } catch (error) {
+    return { preferenceError: Boolean(error) }
   }
 }
 
@@ -49,7 +53,16 @@ function clampPanelWidth(width: number, min: number) {
 
 export default function EditorPage() {
   const { chapterId, universeId } = useParams<{ chapterId: string; universeId: string }>()
+  const routeKey = `${universeId || ''}:${chapterId || ''}`
+  const activeRouteKeyRef = useRef(routeKey)
+  const routeGenerationRef = useRef(0)
+  if (activeRouteKeyRef.current !== routeKey) {
+    activeRouteKeyRef.current = routeKey
+    routeGenerationRef.current += 1
+  }
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const { publish, update } = useFeedback()
   const {
     content,
     wordCount,
@@ -69,6 +82,12 @@ export default function EditorPage() {
   const liveCandidates = useWSStore((s) => s.liveCandidates) || []
   const removeLiveCandidate = useWSStore((s) => s.removeLiveCandidate)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const chapterLoadRequestRef = useRef(0)
+  const knownEntitiesRequestRef = useRef(0)
+  const candidatesRequestRef = useRef(0)
+  const siblingChaptersRequestRef = useRef(0)
+  const layoutStorageErrorNotified = useRef(false)
+  const [initialPanelState] = useState(readPanelState)
   const [workInfo, setWorkInfo] = useState<WorkInfo | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [chapterTitle, setChapterTitle] = useState('')
@@ -77,88 +96,184 @@ export default function EditorPage() {
   const [creatingChapter, setCreatingChapter] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [editorReady, setEditorReady] = useState(false)
-  const [railCollapsed, setRailCollapsed] = useState(() => readPanelState().railCollapsed ?? false)
-  const [contextCollapsed, setContextCollapsed] = useState(() => readPanelState().contextCollapsed ?? false)
-  const [railWidth, setRailWidth] = useState(() => clampPanelWidth(readPanelState().railWidth ?? 240, MIN_RAIL_WIDTH))
-  const [contextWidth, setContextWidth] = useState(() => clampPanelWidth(readPanelState().contextWidth ?? 280, MIN_CONTEXT_WIDTH))
+  const [railCollapsed, setRailCollapsed] = useState(() => initialPanelState.railCollapsed ?? false)
+  const [contextCollapsed, setContextCollapsed] = useState(() => initialPanelState.contextCollapsed ?? false)
+  const [railWidth, setRailWidth] = useState(() => clampPanelWidth(initialPanelState.railWidth ?? 240, MIN_RAIL_WIDTH))
+  const [contextWidth, setContextWidth] = useState(() => clampPanelWidth(initialPanelState.contextWidth ?? 280, MIN_CONTEXT_WIDTH))
   const [craftReviewing, setCraftReviewing] = useState(false)
   const [recoveryDraft, setRecoveryDraft] = useState<ReturnType<typeof getLocalDraft>>(null)
   const [editorKey, setEditorKey] = useState(0)
   const [knownEntities, setKnownEntities] = useState<Array<{ id: string; name: string; type?: string; aliases?: string[] }>>([])
   const [candidates, setCandidates] = useState<EntityCandidateDTO[]>([])
   const [candidateError, setCandidateError] = useState<string | null>(null)
+  const [chapterLoadError, setChapterLoadError] = useState<string | null>(null)
+  const [knownEntitiesError, setKnownEntitiesError] = useState<string | null>(null)
+  const [chaptersError, setChaptersError] = useState<string | null>(null)
+  const previousSaveStatus = useRef<string | null>(null)
 
   useWS()
 
   useEffect(() => {
-    window.localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify({
-      railCollapsed,
-      contextCollapsed,
-      railWidth,
-      contextWidth,
-    }))
-  }, [railCollapsed, contextCollapsed, railWidth, contextWidth])
+    if (!initialPanelState.preferenceError) return
+    publish({ scope: 'write', status: 'failed', message: 'Workspace layout preferences could not be read. Default panel settings were restored.' })
+  }, [initialPanelState.preferenceError, publish])
 
-  // Load chapter data and determine workId
   useEffect(() => {
-    if (!chapterId) return
+    try {
+      window.localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify({
+        railCollapsed,
+        contextCollapsed,
+        railWidth,
+        contextWidth,
+      }))
+    } catch (error) {
+      if (layoutStorageErrorNotified.current) return
+      layoutStorageErrorNotified.current = true
+      publish({
+        scope: 'write',
+        status: 'failed',
+        message: error instanceof Error && error.message ? error.message : 'Workspace layout preferences could not be saved.',
+      })
+    }
+  }, [contextCollapsed, contextWidth, publish, railCollapsed, railWidth])
+
+  const loadChapter = useCallback(async () => {
+    const requestId = ++chapterLoadRequestRef.current
+    const requestRouteKey = routeKey
+    const requestGeneration = routeGenerationRef.current
+    const isCurrentRequest = () => (
+      chapterLoadRequestRef.current === requestId
+      && routeGenerationRef.current === requestGeneration
+      && activeRouteKeyRef.current === requestRouteKey
+    )
+
+    if (!isCurrentRequest()) return
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
     setEditorReady(false)
+    setChapterLoadError(null)
     setRecoveryDraft(null)
+    setChapterTitle('')
     setKnownEntities([])
-    api.getChapter(chapterId).then(({ chapter }) => {
+    setKnownEntitiesError(null)
+    setCandidates([])
+    setCandidateError(null)
+    setWorkInfo(null)
+    setChapters([])
+    setChaptersError(null)
+    setContent('', '')
+
+    if (!chapterId) {
+      setEditorReady(true)
+      return
+    }
+
+    try {
+      const { chapter } = await api.getChapter(chapterId)
+      if (!isCurrentRequest()) return
       setContent(chapter.content || '', chapter.raw_text || '')
       setChapterTitle(chapter.title || '')
       const local = typeof getLocalDraft === 'function' ? getLocalDraft(chapterId) : null
       const serverUpdatedAt = Date.parse(chapter.updated_at || '')
       const localIsNewer = Boolean(local && local.content !== (chapter.content || '') && local.updatedAt > (Number.isFinite(serverUpdatedAt) ? serverUpdatedAt : 0))
       if (localIsNewer) setRecoveryDraft(local)
-      if (chapter.work_id) {
-        api.getWork(chapter.work_id).then(({ work }) => {
-          setWorkInfo({ id: work.id, title: work.title, universe_id: work.universe_id })
-          setEditorReady(true)
-        }).catch(() => setEditorReady(true))
-      } else {
-        setEditorReady(true)
-      }
-    }).catch(() => setEditorReady(true))
-  }, [chapterId]) // eslint-disable-line react-hooks/exhaustive-deps
+      if (!chapter.work_id) throw new Error('This chapter is not attached to a manuscript.')
 
-  useEffect(() => {
+      const { work } = await api.getWork(chapter.work_id)
+      if (!isCurrentRequest()) return
+      setWorkInfo({ id: work.id, title: work.title, universe_id: work.universe_id })
+    } catch (error) {
+      if (!isCurrentRequest()) return
+      const message = error instanceof Error && error.message ? error.message : 'We could not load this chapter.'
+      setChapterLoadError(message)
+      publish({ scope: 'write', status: 'failed', message })
+    } finally {
+      if (isCurrentRequest()) setEditorReady(true)
+    }
+  }, [chapterId, getLocalDraft, publish, routeKey, setContent])
+
+  useEffect(() => { void loadChapter() }, [loadChapter])
+
+  const loadKnownEntities = useCallback(async () => {
     if (!universeId || typeof api.listEntities !== 'function') return
-    let cancelled = false
-    api.listEntities(universeId, { limit: '500', page: '1', status: 'active' })
-      .then(({ entities }) => {
-        if (!cancelled) {
-          setKnownEntities((entities || []).filter((entity: { status?: string }) => !entity.status || entity.status === 'active').map((entity: { id: string; name: string; type?: string; aliases?: string[] }) => ({
-            id: entity.id, name: entity.name, type: entity.type, aliases: entity.aliases,
-          })))
-          setEditorKey((key) => key + 1)
-        }
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [universeId])
+    const requestId = ++knownEntitiesRequestRef.current
+    const requestRouteKey = routeKey
+    const requestGeneration = routeGenerationRef.current
+    const isCurrentRequest = () => (
+      knownEntitiesRequestRef.current === requestId
+      && routeGenerationRef.current === requestGeneration
+      && activeRouteKeyRef.current === requestRouteKey
+    )
+    setKnownEntitiesError(null)
+    try {
+      const { entities } = await api.listEntities(universeId, { limit: '500', page: '1', status: 'active' })
+      if (!isCurrentRequest()) return
+      setKnownEntities((entities || []).filter((entity: { status?: string }) => !entity.status || entity.status === 'active').map((entity: { id: string; name: string; type?: string; aliases?: string[] }) => ({
+        id: entity.id, name: entity.name, type: entity.type, aliases: entity.aliases,
+      })))
+      setEditorKey((key) => key + 1)
+    } catch (error) {
+      if (!isCurrentRequest()) return
+      const message = error instanceof Error && error.message ? error.message : 'Known entity links are unavailable.'
+      setKnownEntitiesError(message)
+      publish({ scope: 'write', status: 'failed', message })
+    }
+  }, [publish, routeKey, universeId])
+
+  useEffect(() => { void loadKnownEntities() }, [loadKnownEntities])
 
   const loadCandidates = useCallback(async () => {
     if (!universeId || typeof api.listEntityCandidates !== 'function') return
+    const requestId = ++candidatesRequestRef.current
+    const requestRouteKey = routeKey
+    const requestGeneration = routeGenerationRef.current
+    const isCurrentRequest = () => (
+      candidatesRequestRef.current === requestId
+      && routeGenerationRef.current === requestGeneration
+      && activeRouteKeyRef.current === requestRouteKey
+    )
     try {
       const response = await api.listEntityCandidates(universeId)
+      if (!isCurrentRequest()) return
       setCandidates(response.candidates || [])
       setCandidateError(null)
     } catch (error) {
-      setCandidateError((error as Error).message || 'Could not load entity candidates')
+      if (!isCurrentRequest()) return
+      const message = (error as Error).message || 'Could not load entity candidates'
+      setCandidateError(message)
+      publish({ scope: 'write', status: 'failed', message })
     }
-  }, [universeId])
+  }, [publish, routeKey, universeId])
 
   useEffect(() => { void loadCandidates() }, [loadCandidates])
 
-  // Load sibling chapters
-  useEffect(() => {
-    if (!workInfo?.id) return
-    api.listChapters(workInfo.id)
-      .then(({ chapters }) => setChapters(chapters || []))
-      .catch(() => {})
-  }, [workInfo?.id, chapterId])
+  const loadSiblingChapters = useCallback(async () => {
+    const workId = workInfo?.id
+    if (!workId) return
+    const requestId = ++siblingChaptersRequestRef.current
+    const requestRouteKey = routeKey
+    const requestGeneration = routeGenerationRef.current
+    const isCurrentRequest = () => (
+      siblingChaptersRequestRef.current === requestId
+      && routeGenerationRef.current === requestGeneration
+      && activeRouteKeyRef.current === requestRouteKey
+    )
+    setChaptersError(null)
+    try {
+      const { chapters: nextChapters } = await api.listChapters(workId)
+      if (!isCurrentRequest()) return
+      setChapters(nextChapters || [])
+    } catch (error) {
+      if (!isCurrentRequest()) return
+      const message = error instanceof Error && error.message ? error.message : 'Chapter navigation is unavailable.'
+      setChaptersError(message)
+      publish({ scope: 'write', status: 'failed', message })
+    }
+  }, [publish, routeKey, workInfo?.id])
+
+  useEffect(() => { void loadSiblingChapters() }, [chapterId, loadSiblingChapters])
 
   // A result arrives as a separate WS message. Keep the explicit review
   // button busy until that message is observed; live paragraph analysis never
@@ -169,23 +284,40 @@ export default function EditorPage() {
 
   useEffect(() => {
     setCraftReviewing(false)
-  }, [chapterId])
+  }, [chapterId, universeId])
+
+  useEffect(() => {
+    if (!chapterId || saveStatus !== 'failed' || previousSaveStatus.current === 'failed') {
+      previousSaveStatus.current = saveStatus || null
+      return
+    }
+    previousSaveStatus.current = saveStatus
+    publish({
+      scope: 'autosave',
+      status: 'failed',
+      message: saveError || 'Autosave failed. Your local recovery copy is still available.',
+      retry: () => saveContent(chapterId),
+    })
+  }, [chapterId, publish, saveContent, saveError, saveStatus])
 
   const handleContentChange = useCallback((_html: string, text: string) => {
     if (!chapterId) return
+    const saveRouteKey = routeKey
+    const saveGeneration = routeGenerationRef.current
     setContent(_html, text, chapterId)
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
+      if (routeGenerationRef.current !== saveGeneration || activeRouteKeyRef.current !== saveRouteKey) return
       void saveContent(chapterId)
     }, 5000)
-  }, [chapterId, setContent, saveContent])
+  }, [chapterId, routeKey, setContent, saveContent])
 
   useEffect(() => () => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
-  }, [chapterId])
+  }, [routeKey])
 
   const handleRestoreDraft = useCallback(() => {
     if (!chapterId || !recoveryDraft) return
@@ -203,10 +335,14 @@ export default function EditorPage() {
   const handleExport = useCallback(async (kind: 'chapter' | 'work') => {
     const id = kind === 'chapter' ? chapterId : workInfo?.id
     if (!id) return
+    const feedbackId = publish({ scope: 'write', status: 'running', message: `Preparing ${kind} export…` })
     try {
       // Export only after the current editor snapshot reaches the server;
       // otherwise a just-typed paragraph is missing from the download.
-      if (chapterId && !(await saveContent(chapterId))) return
+      if (chapterId && !(await saveContent(chapterId))) {
+        update(feedbackId, { status: 'failed', message: 'Export paused because the latest chapter could not be saved.' })
+        return
+      }
       const markdown = kind === 'chapter'
         ? await api.exportChapterMarkdown(id)
         : await api.exportWorkMarkdown(id)
@@ -219,10 +355,13 @@ export default function EditorPage() {
       link.click()
       link.remove()
       URL.revokeObjectURL(url)
+      update(feedbackId, { status: 'completed', message: `${kind === 'chapter' ? 'Chapter' : 'Manuscript'} export is ready.` })
     } catch (error) {
-      setSubmitError((error as Error).message || 'Export failed')
+      const message = (error as Error).message || 'Export failed'
+      setSubmitError(message)
+      update(feedbackId, { status: 'failed', message })
     }
-  }, [chapterId, chapterTitle, saveContent, workInfo])
+  }, [chapterId, chapterTitle, publish, saveContent, update, workInfo])
 
   const handleEntityClick = useCallback((entityId: string) => {
     navigate(`/universe/${universeId}/entities/${entityId}`)
@@ -248,10 +387,13 @@ export default function EditorPage() {
       else await api.dismissEntityCandidate(candidateId)
       setCandidates((current) => current.filter((candidate) => candidate.entity_id !== candidateId))
       removeLiveCandidate(candidateId)
+      publish({ scope: 'review', status: 'completed', message: decision === 'accept' ? 'Entity candidate accepted.' : 'Entity candidate dismissed.' })
     } catch (error) {
-      setCandidateError((error as Error).message || 'Could not save candidate decision')
+      const message = (error as Error).message || 'Could not save candidate decision'
+      setCandidateError(message)
+      publish({ scope: 'review', status: 'failed', message })
     }
-  }, [removeLiveCandidate])
+  }, [publish, removeLiveCandidate])
 
   const handleCraftReview = useCallback(({ passage }: { passage: string; from: number; to: number }) => {
     if (!chapterId || !workInfo?.id || !universeId || !passage.trim() || typeof sendWS !== 'function') return
@@ -265,7 +407,12 @@ export default function EditorPage() {
         passage: passage.trim(),
       },
     })
-  }, [chapterId, universeId, workInfo, sendWS])
+    publish({
+      scope: 'review',
+      status: wsStatus === 'open' ? 'running' : 'queued',
+      message: wsStatus === 'open' ? 'Craft review requested.' : 'Craft review queued until the connection returns.',
+    })
+  }, [chapterId, universeId, workInfo, sendWS, publish, wsStatus])
 
   const handleCreateChapter = async () => {
     if (!workInfo?.id || !newChapterTitle.trim() || creatingChapter) return
@@ -273,11 +420,36 @@ export default function EditorPage() {
     try {
       const { chapter } = await api.createChapter(workInfo.id, { title: newChapterTitle.trim() })
       setShowNewForm(false); setNewChapterTitle('')
-      navigate(`/universe/${universeId}/editor/${chapter.id}`)
+      publish({ scope: 'write', status: 'completed', message: `Created ${chapter.title || 'a new chapter'}.` })
+      navigate(writePath(universeId || '', chapter.id))
     } catch (err) {
-      setSubmitError((err as Error).message || 'Failed to create chapter')
+      const message = (err as Error).message || 'Failed to create chapter'
+      setSubmitError(message)
+      publish({ scope: 'write', status: 'failed', message })
     } finally { setCreatingChapter(false) }
   }
+
+  const openImport = () => {
+    if (universeId) navigate(writeImportPath(universeId, chapterId))
+  }
+
+  const closeImport = () => {
+    if (universeId && chapterId) navigate(writePath(universeId, chapterId), { replace: true })
+  }
+
+  const handleImportCompleted = useCallback(async (workId: string) => {
+    const requestRouteKey = routeKey
+    const requestGeneration = routeGenerationRef.current
+    const isCurrentRequest = () => (
+      routeGenerationRef.current === requestGeneration && activeRouteKeyRef.current === requestRouteKey
+    )
+    if (!universeId || !isCurrentRequest()) return
+    const { chapters: importedChapters } = await api.listChapters(workId)
+    if (!isCurrentRequest()) return
+    const sortedImportedChapters = [...(importedChapters || [])].sort((left, right) => left.order_index - right.order_index)
+    const chapter = sortedImportedChapters[sortedImportedChapters.length - 1]
+    navigate(chapter ? writePath(universeId, chapter.id) : writePath(universeId))
+  }, [navigate, routeKey, universeId])
 
   const wsStatusClass =
     wsStatus === 'open' ? styles.statusOpen
@@ -320,22 +492,29 @@ export default function EditorPage() {
     '--chapter-panel-width': railCollapsed ? '36px' : `${railWidth}px`,
     '--context-panel-width': contextCollapsed ? '36px' : `${contextWidth}px`,
   } as CSSProperties
+  const importOpen = searchParams.get('panel') === 'import'
 
   return (
     <div className={styles.wrap} style={workspaceStyle}>
+      {importOpen && universeId && (
+        <div className={styles.importOverlay} role="dialog" aria-modal="true" aria-label="Import manuscript">
+          <div className={styles.importPanel}>
+            <IngestPanel universeId={universeId} onClose={closeImport} onCompleted={handleImportCompleted} />
+          </div>
+        </div>
+      )}
       {/* Chapter rail */}
       <aside id="chapter-panel" className={`${styles.rail} ${railCollapsed ? styles.panelCollapsed : ''}`} aria-label="Chapter navigation">
         {!railCollapsed && <div className={`${styles.railContent} q-scroll`}>
           <div className={styles.railHeader}>
             {workInfo ? (
-              <span
+              <button
+                type="button"
                 className={styles.railWorkLink}
-                role="button"
-                tabIndex={0}
-                onClick={() => navigate(`/universe/${universeId}/works`)}
+                onClick={() => universeId && navigate(writePath(universeId))}
               >
                 {workInfo.title}
-              </span>
+              </button>
             ) : (
               <span className={styles.railWorkLink} style={{ color: 'var(--muted-3)', cursor: 'default' }}>
                 Works &amp; Chapters
@@ -360,16 +539,26 @@ export default function EditorPage() {
                 onChange={(e) => setNewChapterTitle(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleCreateChapter()}
               />
+              <div className={styles.railFormActions}>
+                <button type="button" onClick={() => void handleCreateChapter()} disabled={creatingChapter}>{creatingChapter ? 'Creating…' : 'Create'}</button>
+                <button type="button" onClick={() => { setShowNewForm(false); setSubmitError(null) }} disabled={creatingChapter}>Cancel</button>
+              </div>
               {submitError && <p className={styles.railFormError}>{submitError}</p>}
             </div>
           )}
 
           <div className={styles.railList}>
+            {chaptersError && (
+              <div className={styles.railError} role="alert">
+                <span>{chaptersError}</span>
+                <button type="button" onClick={() => void loadSiblingChapters()}>Retry</button>
+              </div>
+            )}
             {sorted.map((ch, i) => (
               <button
                 key={ch.id}
                 className={`${styles.railItem} ${ch.id === chapterId ? styles.railItemActive : ''}`}
-                onClick={() => navigate(`/universe/${universeId}/editor/${ch.id}`)}
+                onClick={() => universeId && navigate(writePath(universeId, ch.id))}
               >
                 <span className={styles.railDot} data-status={ch.status} />
                 <span className={styles.railItemTitle}>{i + 1} · {ch.title}</span>
@@ -419,11 +608,17 @@ export default function EditorPage() {
             <span>{wordCount.toLocaleString()} words</span>
             <button type="button" className={styles.exportButton} onClick={() => void handleExport('chapter')} disabled={!chapterId} title="Export chapter as Markdown">↓ Chapter</button>
             <button type="button" className={styles.exportButton} onClick={() => void handleExport('work')} disabled={!workInfo?.id} title="Export work as Markdown">↓ Work</button>
+            <button type="button" className={styles.exportButton} onClick={openImport} disabled={!universeId}>Import</button>
             <span className={`glyph ${styles.wsIndicator} ${wsStatusClass}`} title={`WS: ${wsStatus}`}>●</span>
           </div>
         </div>
 
-        {!editorReady ? (
+        {chapterLoadError ? (
+          <div className={styles.loadError} role="alert">
+            <p>{chapterLoadError}</p>
+            <button type="button" onClick={() => void loadChapter()}>Retry loading chapter</button>
+          </div>
+        ) : !editorReady ? (
           <div className={styles.loading}>Loading editor…</div>
         ) : chapterId && workInfo ? (
           <>
@@ -448,6 +643,13 @@ export default function EditorPage() {
               onCraftReview={handleCraftReview}
               reviewing={craftReviewing}
             />
+            {knownEntitiesError && (
+              <div className={styles.editorNotice} role="status">
+                <span>{knownEntitiesError}</span>
+                <button type="button" onClick={() => void loadKnownEntities()}>Retry entity links</button>
+              </div>
+            )}
+            {submitError && <div className={styles.editorNotice} role="alert">{submitError}</div>}
           </>
         ) : (
           <div className={styles.noChapterState}>

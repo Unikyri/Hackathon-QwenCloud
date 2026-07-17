@@ -24,6 +24,9 @@
 .observation small { grid-column: 1 / -1; color: var(--muted, #776f65); }
 .state { color: var(--muted, #776f65); padding: 16px 0; }
 .error { color: #9d3e36; }
+.error p { margin: 0 0 8px; }
+.retryButton { border: 0; background: transparent; color: currentColor; cursor: pointer; font: inherit; font-weight: 700; padding: 0; }
+.retryButton:hover { text-decoration: underline; }
 .list { display: grid; gap: 12px; margin-top: 16px; }
 .card { border: 1px solid var(--line, #d7cfc2); border-radius: 9px; padding: 14px; background: #fffdf8; }
 .statement { margin: 0 0 10px; color: var(--ink, #24333a); line-height: 1.45; }

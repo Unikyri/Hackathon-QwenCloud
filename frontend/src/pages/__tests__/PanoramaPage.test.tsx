@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import PanoramaPage from '../PanoramaPage'
@@ -158,5 +158,39 @@ describe('PanoramaPage', () => {
     })
     expect(screen.queryByText('Continue writing →')).not.toBeInTheDocument()
     expect(screen.getByText(/No active ingestion/)).toBeInTheDocument()
+  })
+
+  it('shows a retryable error instead of an empty panorama when overview data fails', async () => {
+    mockGetTimeline
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({
+        events: [
+          { id: 't1', label: 'Birth of Kaelen', timestamp: 'Year 820', description: '' },
+          { id: 't2', label: 'Fall of Aethelgard', timestamp: 'Year 840', description: '' },
+        ],
+      })
+
+    renderPage()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the panorama.')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(screen.getByText('47')).toBeInTheDocument())
+  })
+
+  it('shows a retryable chapter error instead of claiming that no work exists', async () => {
+    mockListChapters
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ chapters: [{ id: 'ch1', title: 'Chapter 1', order_index: 1, word_count: 1200 }] })
+
+    renderPage()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the latest chapter.')
+    expect(screen.queryByText(/No active work/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(screen.getByText('Continue writing →')).toBeInTheDocument())
   })
 })

@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 
-// ponytail: ReactFlow v11 needs ResizeObserver in jsdom; mock it globally
+// The Cytoscape canvas lifecycle observes container resizing; jsdom has no native observer.
 globalThis.ResizeObserver = class ResizeObserver {
   observe() {}
   unobserve() {}

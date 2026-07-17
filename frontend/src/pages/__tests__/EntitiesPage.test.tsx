@@ -47,17 +47,16 @@ describe('EntitiesPage', () => {
       })
 
     renderPage()
-    await waitFor(() => expect(mockListEntities).toHaveBeenCalledWith('uni-1', { limit: '100', page: '1' }))
+    await screen.findByText('No entities found.')
+    expect(mockListEntities).toHaveBeenLastCalledWith('uni-1', { limit: '100', page: '1' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Objects (1)' }))
-    await waitFor(() => {
-      expect(mockListEntities).toHaveBeenLastCalledWith('uni-1', { limit: '100', page: '1', type: 'object' })
-    })
+    const loadMore = await screen.findByText('Load more (100 of 101)')
+    expect(mockListEntities).toHaveBeenLastCalledWith('uni-1', { limit: '100', page: '1', type: 'object' })
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Load more (100 of 101)' }))
-    await waitFor(() => {
-      expect(mockListEntities).toHaveBeenLastCalledWith('uni-1', { limit: '100', page: '2', type: 'object' })
-    })
+    fireEvent.click(loadMore)
+    expect(await screen.findByText('Object 100')).toBeInTheDocument()
+    expect(mockListEntities).toHaveBeenLastCalledWith('uni-1', { limit: '100', page: '2', type: 'object' })
   })
 
   it('requests search terms from the server instead of filtering the loaded page locally', async () => {
@@ -70,13 +69,12 @@ describe('EntitiesPage', () => {
       })
 
     renderPage()
-    await waitFor(() => expect(mockListEntities).toHaveBeenCalledTimes(1))
+    await screen.findByText('No entities found.')
+    expect(mockListEntities).toHaveBeenLastCalledWith('uni-1', { limit: '100', page: '1' })
 
     fireEvent.change(screen.getByPlaceholderText('Search entity or alias…'), { target: { value: 'Fil' } })
-    await waitFor(() => {
-      expect(mockListEntities).toHaveBeenLastCalledWith('uni-1', { limit: '100', page: '1', search: 'Fil' })
-    })
     expect(await screen.findByText('Filip')).toBeInTheDocument()
+    expect(mockListEntities).toHaveBeenLastCalledWith('uni-1', { limit: '100', page: '1', search: 'Fil' })
   })
 
   it('discards an older pagination response after the query changes', async () => {
@@ -96,14 +94,15 @@ describe('EntitiesPage', () => {
       })
 
     renderPage()
-    await waitFor(() => expect(mockListEntities).toHaveBeenCalledTimes(1))
+    await screen.findByText('No entities found.')
+    expect(mockListEntities).toHaveBeenLastCalledWith('uni-1', { limit: '100', page: '1' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Objects (1)' }))
-    await screen.findByRole('button', { name: 'Load more (100 of 101)' })
-    fireEvent.click(screen.getByRole('button', { name: 'Load more (100 of 101)' }))
-    await waitFor(() => {
-      expect(mockListEntities).toHaveBeenLastCalledWith('uni-1', { limit: '100', page: '2', type: 'object' })
-    })
+    const loadMore = await screen.findByText('Load more (100 of 101)')
+    expect(mockListEntities).toHaveBeenLastCalledWith('uni-1', { limit: '100', page: '1', type: 'object' })
+    fireEvent.click(loadMore)
+    await screen.findByText('Loading…')
+    expect(mockListEntities).toHaveBeenLastCalledWith('uni-1', { limit: '100', page: '2', type: 'object' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Characters (2)' }))
     await screen.findByText('Character result')
@@ -118,5 +117,44 @@ describe('EntitiesPage', () => {
       expect(screen.queryByText('Stale object')).not.toBeInTheDocument()
       expect(screen.getByText('Character result')).toBeInTheDocument()
     })
+  })
+
+  it('shows a retryable error instead of an empty state when the entity list fails', async () => {
+    mockListEntities
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ entities: [], counts_by_type: counts, pagination: { total: 0 } })
+
+    renderPage()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load entities for this universe.')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(await screen.findByText('No entities found.')).toBeInTheDocument()
+  })
+
+  it('keeps loaded entities visible and retries a failed pagination request', async () => {
+    mockListEntities
+      .mockResolvedValueOnce({
+        entities: Array.from({ length: 100 }, (_, index) => ({ id: `object-${index}`, name: `Object ${index}`, type: 'object' })),
+        counts_by_type: counts,
+        pagination: { total: 101 },
+      })
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({
+        entities: [{ id: 'object-100', name: 'Object 100', type: 'object' }],
+        counts_by_type: counts,
+        pagination: { total: 101 },
+      })
+
+    renderPage()
+    const loadMore = await screen.findByRole('button', { name: 'Load more (100 of 101)' })
+    fireEvent.click(loadMore)
+
+    expect(await screen.findByText('Could not load more entities. Showing the results already loaded.')).toBeInTheDocument()
+    expect(screen.getByText('Object 0')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(await screen.findByText('Object 100')).toBeInTheDocument()
   })
 })

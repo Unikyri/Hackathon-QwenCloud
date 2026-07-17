@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/quill/backend/internal/models"
 )
+
+var ErrWorkNotFound = errors.New("work not found")
 
 type WorkRepo struct {
 	pool *pgxpool.Pool
@@ -42,10 +45,32 @@ func (r *WorkRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Work, er
 		&w.Synopsis, &w.Status, &w.CreatedAt, &w.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("work not found")
+		return nil, ErrWorkNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("find work: %w", err)
+	}
+	return w, nil
+}
+
+// FindByIDInUniverse loads a work only when it still belongs to universeID.
+// It is used after authorization so a stale or concurrent parent change cannot
+// make a work mutation cross a universe boundary.
+func (r *WorkRepo) FindByIDInUniverse(ctx context.Context, id, universeID uuid.UUID) (*models.Work, error) {
+	query := `
+		SELECT id, universe_id, title, type, order_index, COALESCE(synopsis, ''), status, created_at, updated_at
+		FROM works WHERE id = $1 AND universe_id = $2
+	`
+	w := &models.Work{}
+	err := r.pool.QueryRow(ctx, query, id, universeID).Scan(
+		&w.ID, &w.UniverseID, &w.Title, &w.Type, &w.OrderIndex,
+		&w.Synopsis, &w.Status, &w.CreatedAt, &w.UpdatedAt,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, ErrWorkNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find work in universe: %w", err)
 	}
 	return w, nil
 }
@@ -86,23 +111,29 @@ func (r *WorkRepo) GetMaxOrderIndex(ctx context.Context, universeID uuid.UUID) (
 	return maxOrder, nil
 }
 
-func (r *WorkRepo) Update(ctx context.Context, tx pgx.Tx, w *models.Work) error {
+func (r *WorkRepo) Update(ctx context.Context, tx pgx.Tx, universeID uuid.UUID, w *models.Work) error {
 	query := `
 		UPDATE works SET title=$1, type=$2, order_index=$3, synopsis=$4, status=$5, updated_at=NOW()
-		WHERE id=$6
+		WHERE id=$6 AND universe_id=$7
 	`
-	_, err := tx.Exec(ctx, query, w.Title, w.Type, w.OrderIndex, w.Synopsis, w.Status, w.ID)
+	result, err := tx.Exec(ctx, query, w.Title, w.Type, w.OrderIndex, w.Synopsis, w.Status, w.ID, universeID)
 	if err != nil {
 		return fmt.Errorf("update work: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrWorkNotFound
 	}
 	return nil
 }
 
-func (r *WorkRepo) Delete(ctx context.Context, tx pgx.Tx, id uuid.UUID) error {
-	query := `DELETE FROM works WHERE id = $1`
-	_, err := tx.Exec(ctx, query, id)
+func (r *WorkRepo) Delete(ctx context.Context, tx pgx.Tx, id, universeID uuid.UUID) error {
+	query := `DELETE FROM works WHERE id = $1 AND universe_id = $2`
+	result, err := tx.Exec(ctx, query, id, universeID)
 	if err != nil {
 		return fmt.Errorf("delete work: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrWorkNotFound
 	}
 	return nil
 }

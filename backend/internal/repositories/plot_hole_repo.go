@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/quill/backend/internal/models"
 )
+
+var ErrPlotHoleNotFound = errors.New("plot hole not found")
 
 type PlotHoleRepo struct {
 	pool *pgxpool.Pool
@@ -86,4 +89,28 @@ func (r *PlotHoleRepo) FindOpenByArc(ctx context.Context, universeID uuid.UUID, 
 		result = append(result, ph)
 	}
 	return result, nil
+}
+
+// Resolve marks a plot hole as resolved only when it belongs to universeID.
+func (r *PlotHoleRepo) Resolve(ctx context.Context, id, universeID uuid.UUID) error {
+	return r.updateStatus(ctx, id, universeID, "resolved")
+}
+
+// Dismiss marks a plot hole as dismissed only when it belongs to universeID.
+func (r *PlotHoleRepo) Dismiss(ctx context.Context, id, universeID uuid.UUID) error {
+	return r.updateStatus(ctx, id, universeID, "dismissed")
+}
+
+func (r *PlotHoleRepo) updateStatus(ctx context.Context, id, universeID uuid.UUID, status string) error {
+	result, err := r.pool.Exec(ctx,
+		`UPDATE plot_holes SET status = $3 WHERE id = $1 AND universe_id = $2`,
+		id, universeID, status,
+	)
+	if err != nil {
+		return fmt.Errorf("update plot hole status: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrPlotHoleNotFound
+	}
+	return nil
 }

@@ -451,6 +451,7 @@ func (h *Hub) sendAnalysisFailure(userID uuid.UUID, submitted models.ParagraphSu
 		ParagraphRef: submitted.ParagraphRef,
 		WorkID:       submitted.WorkID,
 		ChapterID:    submitted.ChapterID,
+		UniverseID:   submitted.UniverseID,
 		Reason:       reason,
 	})
 	if err != nil {
@@ -520,9 +521,9 @@ func (h *Hub) handleRecallRequest(userID uuid.UUID, msg WSMessage) {
 		return
 	}
 
-	resultMsg, _ := NewMessage(TypeContextualRecall, map[string]interface{}{
-		"universe_id": payload.UniverseID,
-		"items":       items,
+	resultMsg, _ := NewMessage(TypeContextualRecall, models.ContextualRecallPayload{
+		UniverseID: payload.UniverseID,
+		Items:      items,
 	})
 	_ = h.SendToUser(userID, resultMsg)
 }

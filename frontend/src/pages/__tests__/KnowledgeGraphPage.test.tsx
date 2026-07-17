@@ -5,6 +5,25 @@ import KnowledgeGraphPage from '../KnowledgeGraphPage'
 import { UniverseContext } from '../../contexts/UniverseContext'
 import { useGraphStore } from '../../stores/graphStore'
 
+const { mockCytoscape } = vi.hoisted(() => {
+  const core = {
+    add: vi.fn(),
+    destroy: vi.fn(),
+    elements: vi.fn(() => ({ remove: vi.fn(), unselect: vi.fn() })),
+    fit: vi.fn(),
+    layout: vi.fn(() => ({ run: vi.fn() })),
+    on: vi.fn(),
+    resize: vi.fn(),
+    $id: vi.fn(() => ({ select: vi.fn() })),
+  }
+  const mockCytoscape = Object.assign(vi.fn(() => core), { use: vi.fn() })
+
+  return { mockCytoscape }
+})
+
+vi.mock('cytoscape', () => ({ default: mockCytoscape }))
+vi.mock('cytoscape-fcose', () => ({ default: {} }))
+
 // CSS module mock
 vi.mock('../KnowledgeGraphPage.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
 
@@ -46,12 +65,14 @@ const defaultContext = {
   refetchWorks: vi.fn(),
 }
 
+const graphLimits = { hops: 2, max_hops: 2, node_limit: 96, edge_limit: 160, result_limit: 256 }
+
 function renderPage() {
   return render(
     <UniverseContext.Provider value={defaultContext}>
-      <MemoryRouter initialEntries={['/universe/uni-1/graph']}>
+      <MemoryRouter initialEntries={['/universe/uni-1/explore/map']}>
         <Routes>
-          <Route path="/universe/:universeId/graph" element={<KnowledgeGraphPage />} />
+          <Route path="/universe/:universeId/explore/map" element={<KnowledgeGraphPage />} />
         </Routes>
       </MemoryRouter>
     </UniverseContext.Provider>
@@ -69,6 +90,8 @@ beforeEach(() => {
     nodeFilter: { character: true, place: true, object: true, event: true, faction: true, world_rule: true, plot_arc: true },
     loading: false,
     error: null,
+    truncated: false,
+    limits: null,
     _universeId: null,
     focalNodeId: null,
     breadcrumb: [],
@@ -88,7 +111,7 @@ describe('KnowledgeGraphPage', () => {
     renderPage()
 
     await waitFor(() => {
-      expect(screen.getByText('No knowledge graph yet. Ingest a manuscript to build relationships.')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'No relationship map yet' })).toBeInTheDocument()
     })
   })
 
@@ -99,15 +122,86 @@ describe('KnowledgeGraphPage', () => {
         { id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } },
       ],
       edges: [],
+      truncated: false,
+      limits: graphLimits,
     })
     renderPage()
 
     await waitFor(() => {
-      // "Character" is rendered both by the filter bar (GraphControls) and the
-      // page's own legend — disambiguate with getAllByText instead of getByText.
-      expect(screen.getByText('Character')).toBeInTheDocument()
-      expect(screen.getByText('Place')).toBeInTheDocument()
+      expect(screen.getByRole('application', { name: /story relationship map/i })).toBeInTheDocument()
+      expect(screen.getByRole('checkbox', { name: 'Toggle Character entities' })).toBeInTheDocument()
     })
+  })
+
+  it('warns when the server returns a truncated neighborhood', async () => {
+    mockListEntities.mockResolvedValue({ entities: [{ id: 'n1' }] })
+    mockGetEntityNeighbors.mockResolvedValue({
+      nodes: [{ id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } }],
+      edges: [],
+      truncated: true,
+      limits: graphLimits,
+    })
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('Large neighborhood: showing a bounded partial map.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Retry map' })).toBeInTheDocument()
+    })
+  })
+
+  it('distinguishes a failed entity search from zero matching entities and offers retry', async () => {
+    mockListEntities
+      .mockResolvedValueOnce({ entities: [{ id: 'n1' }] })
+      .mockRejectedValueOnce(new Error('Search connection lost'))
+    mockGetEntityNeighbors.mockResolvedValue({
+      nodes: [{ id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } }],
+      edges: [],
+      truncated: false,
+      limits: graphLimits,
+    })
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('application', { name: /story relationship map/i })).toBeInTheDocument()
+    })
+
+    vi.useFakeTimers()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Jump to entity' }), { target: { value: 'alice' } })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(180)
+    })
+    vi.useRealTimers()
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Search unavailable. Search connection lost')
+    expect(screen.getByRole('button', { name: 'Retry search' })).toBeInTheDocument()
+    expect(screen.queryByText('No matching entities.')).not.toBeInTheDocument()
+  })
+
+  it('labels a successful empty entity search as zero matches', async () => {
+    mockListEntities
+      .mockResolvedValueOnce({ entities: [{ id: 'n1' }] })
+      .mockResolvedValueOnce({ entities: [] })
+    mockGetEntityNeighbors.mockResolvedValue({
+      nodes: [{ id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } }],
+      edges: [],
+      truncated: false,
+      limits: graphLimits,
+    })
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('application', { name: /story relationship map/i })).toBeInTheDocument()
+    })
+
+    vi.useFakeTimers()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Jump to entity' }), { target: { value: 'missing' } })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(180)
+    })
+    vi.useRealTimers()
+
+    expect(screen.getByText('No matching entities.')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('shows error state on API failure', async () => {
@@ -134,11 +228,13 @@ describe('KnowledgeGraphPage', () => {
     mockGetEntityNeighbors.mockResolvedValue({
       nodes: [{ id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } }],
       edges: [],
+      truncated: false,
+      limits: graphLimits,
     })
     renderPage()
 
     await waitFor(() => {
-      expect(screen.getByText('Character')).toBeInTheDocument()
+      expect(screen.getByRole('application', { name: /story relationship map/i })).toBeInTheDocument()
     })
     // fetchGraph called once during load
     expect(mockGetEntityNeighbors).toHaveBeenCalledTimes(1)
@@ -163,14 +259,14 @@ describe('KnowledgeGraphPage', () => {
     renderPage()
 
     await waitFor(() => {
-      expect(screen.getByText('No knowledge graph yet. Ingest a manuscript to build relationships.')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'No relationship map yet' })).toBeInTheDocument()
     })
 
-    const ctaButton = screen.getByText('Go to Ingestion')
+    const ctaButton = screen.getByRole('button', { name: 'Go to import' })
     expect(ctaButton).toBeInTheDocument()
     expect(ctaButton.tagName).toBe('BUTTON')
 
     fireEvent.click(ctaButton)
-    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-1/ingest')
+    expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-1/write?panel=import')
   })
 })

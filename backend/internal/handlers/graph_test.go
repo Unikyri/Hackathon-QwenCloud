@@ -271,6 +271,68 @@ func TestGraphHandlerNeighborsMissingGraph(t *testing.T) {
 	if string(nodes) != "[]" || string(edges) != "[]" {
 		t.Errorf("expected empty arrays, got nodes=%s edges=%s", nodes, edges)
 	}
+	var truncated bool
+	if err := json.Unmarshal(body["truncated"], &truncated); err != nil {
+		t.Fatalf("decode truncated: %v", err)
+	}
+	if truncated {
+		t.Error("missing graph must be an empty complete neighborhood, not a truncated one")
+	}
+	if _, ok := body["limits"]; !ok {
+		t.Fatal("response missing bounded traversal limits")
+	}
+}
+
+func TestGraphHandlerNeighborsClampsAndReturnsTraversalMetadata(t *testing.T) {
+	app := fiber.New()
+	stub := &stubGraphQuerier{traversal: repositories.GraphTraversalResult{
+		Nodes:     []repositories.GraphNode{{ID: "n1"}},
+		Edges:     []repositories.GraphEdge{},
+		Truncated: true,
+		Limits: repositories.GraphTraversalLimits{
+			Hops:        repositories.GraphTraversalMaxHops,
+			MaxHops:     repositories.GraphTraversalMaxHops,
+			NodeLimit:   repositories.GraphTraversalNodeLimit,
+			EdgeLimit:   repositories.GraphTraversalEdgeLimit,
+			ResultLimit: repositories.GraphTraversalResultLimit,
+		},
+	}}
+	h := &GraphHandler{
+		graphRepo:  stub,
+		memorySvc:  services.NewMemoryService(nil, nil, nil),
+		entityRepo: repositories.NewEntityRepo(nil),
+	}
+	app.Get("/api/v1/entities/:id/neighbors", h.Neighbors)
+
+	validID := "123e4567-e89b-12d3-a456-426614174000"
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/entities/"+validID+"/neighbors?universe_id="+validID+"&hops=99", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if stub.gotHops != repositories.GraphTraversalMaxHops {
+		t.Errorf("hops = %d, want %d", stub.gotHops, repositories.GraphTraversalMaxHops)
+	}
+	if !stub.sawDeadline {
+		t.Error("expected bounded traversal to receive a request deadline")
+	}
+
+	var body struct {
+		Truncated bool                              `json:"truncated"`
+		Limits    repositories.GraphTraversalLimits `json:"limits"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !body.Truncated {
+		t.Error("expected handler to preserve repository truncation metadata")
+	}
+	if body.Limits.NodeLimit != repositories.GraphTraversalNodeLimit || body.Limits.EdgeLimit != repositories.GraphTraversalEdgeLimit || body.Limits.ResultLimit != repositories.GraphTraversalResultLimit {
+		t.Errorf("unexpected limits: %#v", body.Limits)
+	}
 }
 
 func TestNewGraphHandler(t *testing.T) {
@@ -284,13 +346,23 @@ func TestNewGraphHandler(t *testing.T) {
 
 // ── stub graph querier for testing error paths ──
 
-type stubGraphQuerier struct{ errorMsg string }
+type stubGraphQuerier struct {
+	errorMsg    string
+	traversal   repositories.GraphTraversalResult
+	gotHops     int
+	sawDeadline bool
+}
 
 func (s *stubGraphQuerier) FullQuery(_ context.Context, _ string) ([]repositories.GraphNode, []repositories.GraphEdge, error) {
 	return nil, nil, &stubQuerierErr{msg: s.errorMsg}
 }
-func (s *stubGraphQuerier) NHopTraversal(_ context.Context, _ string, _ string, _ int) ([]repositories.GraphNode, []repositories.GraphEdge, error) {
-	return nil, nil, &stubQuerierErr{msg: s.errorMsg}
+func (s *stubGraphQuerier) BoundedNHopTraversal(ctx context.Context, _ string, _ string, hops int) (repositories.GraphTraversalResult, error) {
+	s.gotHops = hops
+	_, s.sawDeadline = ctx.Deadline()
+	if s.errorMsg != "" {
+		return repositories.GraphTraversalResult{}, &stubQuerierErr{msg: s.errorMsg}
+	}
+	return s.traversal, nil
 }
 
 type stubQuerierErr struct{ msg string }

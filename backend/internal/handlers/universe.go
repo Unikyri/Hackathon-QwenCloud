@@ -11,10 +11,17 @@ import (
 
 type UniverseHandler struct {
 	universeSvc *services.UniverseService
+	ownerRepo   universeOwnerResolver
 }
 
 func NewUniverseHandler(universeSvc *services.UniverseService) *UniverseHandler {
 	return &UniverseHandler{universeSvc: universeSvc}
+}
+
+// SetUniverseOwnerRepo enables ownership checks for universe-scoped operations
+// while preserving focused handler construction in tests.
+func (h *UniverseHandler) SetUniverseOwnerRepo(repo universeOwnerResolver) {
+	h.ownerRepo = repo
 }
 
 func (h *UniverseHandler) Create(c *fiber.Ctx) error {
@@ -71,6 +78,9 @@ func (h *UniverseHandler) GetByID(c *fiber.Ctx) error {
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe ID"},
 		})
 	}
+	if err := authorizeUniverse(c, h.ownerRepo, id); err != nil {
+		return universeAccessError(c, err)
+	}
 
 	u, err := h.universeSvc.GetByID(c.Context(), id)
 	if err != nil {
@@ -88,6 +98,9 @@ func (h *UniverseHandler) Update(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe ID"},
 		})
+	}
+	if err := authorizeUniverse(c, h.ownerRepo, id); err != nil {
+		return universeAccessError(c, err)
 	}
 
 	var req models.CreateUniverseRequest
@@ -113,6 +126,9 @@ func (h *UniverseHandler) Delete(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe ID"},
 		})
+	}
+	if err := authorizeUniverse(c, h.ownerRepo, id); err != nil {
+		return universeAccessError(c, err)
 	}
 
 	if err := h.universeSvc.Delete(c.Context(), id); err != nil {

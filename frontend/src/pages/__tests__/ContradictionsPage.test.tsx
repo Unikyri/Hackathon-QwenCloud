@@ -11,11 +11,13 @@ vi.mock('../ContradictionsPage.module.css', () => ({ default: new Proxy({}, { ge
 // Mock api
 const mockGetContradictions = vi.fn()
 const mockResolveContradiction = vi.fn()
+const mockDismissContradiction = vi.fn()
 
 vi.mock('../../lib/api', () => ({
   api: {
     getContradictions: (...args: unknown[]) => mockGetContradictions(...args),
     resolveContradiction: (...args: unknown[]) => mockResolveContradiction(...args),
+    dismissContradiction: (...args: unknown[]) => mockDismissContradiction(...args),
   },
 }))
 
@@ -39,8 +41,6 @@ function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  // Mock confirm to always return true
-  vi.spyOn(window, 'confirm').mockReturnValue(true)
 })
 
 describe('ContradictionsPage', () => {
@@ -79,14 +79,22 @@ describe('ContradictionsPage', () => {
     })
   })
 
-  it('shows error state on failure', async () => {
-    mockGetContradictions.mockRejectedValue(new Error('Server down'))
+  it('shows an accessible retry after a load failure', async () => {
+    mockGetContradictions
+      .mockRejectedValueOnce(new Error('Server down'))
+      .mockResolvedValueOnce({ contradictions: [{ id: 'c1', description: 'Recovered issue', severity: 'high', status: 'open' }] })
     renderPage()
 
     await waitFor(() => {
-      expect(screen.getByText('Could not load')).toBeInTheDocument()
+      expect(screen.getByRole('alert')).toHaveTextContent('Could not load')
       expect(screen.getByText('Server down')).toBeInTheDocument()
     })
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /retry loading contradictions/i }))
+
+    await waitFor(() => expect(mockGetContradictions).toHaveBeenCalledTimes(2))
+    expect(screen.getByText('Recovered issue')).toBeInTheDocument()
   })
 
   it('filters contradictions by severity', async () => {
@@ -112,7 +120,7 @@ describe('ContradictionsPage', () => {
     expect(screen.queryByText('Low issue')).not.toBeInTheDocument()
   })
 
-  it('resolves contradiction optimistically on confirm', async () => {
+  it('requires inline confirmation before resolving a contradiction and moves focus to the confirmation', async () => {
     mockGetContradictions.mockResolvedValue({
       contradictions: [
         { id: 'c1', description: 'Fix me', severity: 'medium', status: 'open' },
@@ -128,12 +136,34 @@ describe('ContradictionsPage', () => {
     const user = userEvent.setup()
     await user.click(screen.getByText('Resolve'))
 
-    // Confirm dialog was shown
-    expect(window.confirm).toHaveBeenCalledWith('Mark as resolved?')
+    expect(screen.getByRole('group', { name: 'Resolve contradiction: Fix me' })).toBeInTheDocument()
+    expect(mockResolveContradiction).not.toHaveBeenCalled()
+
+    const confirmButton = screen.getByRole('button', { name: 'Confirm resolve' })
+    expect(confirmButton).toHaveFocus()
+    await user.click(confirmButton)
 
     await waitFor(() => {
-      expect(screen.getByText('✓ Resolved')).toBeInTheDocument()
+      expect(screen.getByText('Resolved')).toBeInTheDocument()
       expect(mockResolveContradiction).toHaveBeenCalledWith('uni-1', 'c1')
     })
+  })
+
+  it('keeps a contradiction open and explains recovery when resolution fails', async () => {
+    mockGetContradictions.mockResolvedValue({
+      contradictions: [{ id: 'c1', description: 'Fix me', severity: 'medium', status: 'open' }],
+    })
+    mockResolveContradiction.mockRejectedValue(new Error('Service unavailable'))
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Fix me')).toBeInTheDocument())
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Resolve' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm resolve' }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/service unavailable/i))
+    expect(screen.getByRole('button', { name: 'Resolve' })).toBeInTheDocument()
+    expect(screen.queryByText('Resolved')).not.toBeInTheDocument()
   })
 })

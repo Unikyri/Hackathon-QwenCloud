@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -138,6 +139,39 @@ func TestWorkRepoCRUD(t *testing.T) {
 	}
 	if maxOrder != 1 {
 		t.Errorf("max order = %d, want 1", maxOrder)
+	}
+
+	foreignUniverseID := uuid.New()
+	if _, err := workRepo.FindByIDInUniverse(ctx, w.ID, foreignUniverseID); !errors.Is(err, ErrWorkNotFound) {
+		t.Fatalf("FindByIDInUniverse foreign error = %v, want ErrWorkNotFound", err)
+	}
+
+	updateTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin foreign update: %v", err)
+	}
+	updated := *w
+	updated.Title = "Foreign update"
+	if err := workRepo.Update(ctx, updateTx, foreignUniverseID, &updated); !errors.Is(err, ErrWorkNotFound) {
+		t.Fatalf("foreign update error = %v, want ErrWorkNotFound", err)
+	}
+	_ = updateTx.Rollback(ctx)
+
+	deleteTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin foreign delete: %v", err)
+	}
+	if err := workRepo.Delete(ctx, deleteTx, w.ID, foreignUniverseID); !errors.Is(err, ErrWorkNotFound) {
+		t.Fatalf("foreign delete error = %v, want ErrWorkNotFound", err)
+	}
+	_ = deleteTx.Rollback(ctx)
+
+	found, err = workRepo.FindByID(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("find after foreign mutations: %v", err)
+	}
+	if found.Title != "Test Work" {
+		t.Errorf("title after foreign update = %q, want unchanged", found.Title)
 	}
 }
 

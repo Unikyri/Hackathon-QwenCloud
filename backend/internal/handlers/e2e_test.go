@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,10 +11,12 @@ import (
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/quill/backend/internal/config"
 	"github.com/quill/backend/internal/middleware"
+	"github.com/quill/backend/internal/models"
 	"github.com/quill/backend/internal/repositories"
 	"github.com/quill/backend/internal/services"
 	"github.com/quill/backend/internal/testutil"
@@ -22,7 +25,7 @@ import (
 
 // TestE2EFullFlow validates the end-to-end across Phase 2a endpoints.
 func TestE2EFullFlow(t *testing.T) {
-	_, app := setupE2EApp(t)
+	pool, app := setupE2EApp(t)
 
 	// ── Register + Login ──
 	registerBody := `{"email":"e2e@test.com","password":"password123","display_name":"E2E User"}`
@@ -64,13 +67,33 @@ func TestE2EFullFlow(t *testing.T) {
 		t.Fatalf("create universe: %v", err)
 	}
 	var uv struct {
-		Universe struct{ ID string `json:"id"` } `json:"universe"`
+		Universe struct {
+			ID string `json:"id"`
+		} `json:"universe"`
 	}
 	body, _ = io.ReadAll(resp.Body)
 	json.Unmarshal(body, &uv)
 	universeID := uv.Universe.ID
 	if universeID == "" {
 		t.Fatal("universe ID is empty")
+	}
+	universeUUID, err := uuid.Parse(universeID)
+	if err != nil {
+		t.Fatalf("parse created universe ID: %v", err)
+	}
+	contradiction := &models.Contradiction{
+		ID:          uuid.New(),
+		UniverseID:  universeUUID,
+		Severity:    "high",
+		Description: "The E2E fixture contains contradictory evidence.",
+		Suggestion:  "Review the conflicting evidence.",
+		EvidenceA:   "The protagonist left the city.",
+		EvidenceB:   "The protagonist remained in the city.",
+		Fingerprint: "e2e-" + universeID,
+		Status:      "open",
+	}
+	if err := repositories.NewContradictionRepo(pool).Create(context.Background(), contradiction); err != nil {
+		t.Fatalf("create E2E contradiction fixture: %v", err)
 	}
 
 	// ── Create Work ──
@@ -114,7 +137,7 @@ func TestE2EFullFlow(t *testing.T) {
 	}
 
 	checkEndpoint("contradictions list", "GET", "/api/v1/universes/"+universeID+"/contradictions", "")
-	checkEndpoint("contradiction resolve", "PUT", "/api/v1/universes/"+universeID+"/contradictions/00000000-0000-4000-8000-0000000000e2/resolve", "")
+	checkEndpoint("contradiction resolve", "PUT", "/api/v1/universes/"+universeID+"/contradictions/"+contradiction.ID.String()+"/resolve", "")
 	checkEndpoint("timeline list", "GET", "/api/v1/universes/"+universeID+"/timeline", "")
 	checkEndpoint("plot holes", "GET", "/api/v1/universes/"+universeID+"/plot-holes", "")
 	checkEndpoint("graph", "GET", "/api/v1/universes/"+universeID+"/graph", "")
@@ -183,6 +206,7 @@ func setupE2EApp(t *testing.T) (*pgxpool.Pool, *fiber.App) {
 	authH := NewAuthHandler(authSvc)
 	universeH := NewUniverseHandler(universeSvc)
 	workH := NewWorkHandler(workSvc)
+	workH.SetOwnershipRepos(universeRepo, workRepo)
 	contradictionH := NewContradictionHandler(contraSvc, contradictionRepo)
 	timelineH := NewTimelineHandler(timelineSvc, timelineRepo)
 	plotHoleH := NewPlotHoleHandler(plotHoleSvc).WithRepo(plotHoleRepo)

@@ -21,7 +21,8 @@ func CORSMiddleware(allowedOrigins string) fiber.Handler {
 			c.Set("Access-Control-Allow-Origin", origin)
 		}
 		c.Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		c.Set("Access-Control-Allow-Headers", "Origin,Content-Type,Accept,Authorization")
+		c.Set("Access-Control-Allow-Headers", "Origin,Content-Type,Accept,Authorization,X-Request-ID,X-Session-ID")
+		c.Set("Access-Control-Expose-Headers", "X-Request-ID")
 		c.Set("Access-Control-Allow-Credentials", "true")
 
 		if c.Method() == "OPTIONS" {

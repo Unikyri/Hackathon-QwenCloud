@@ -18,7 +18,7 @@ func (t *fakeIngestionTicker) Stop()               { t.stopped = true }
 func TestIngestionProgressETAStartsAfterTenPercent(t *testing.T) {
 	now := time.Unix(0, 0)
 	svc := &IngestionService{progressNow: func() time.Time { return now }}
-	tracker := newIngestionProgressTracker(svc, uuid.New(), uuid.New(), 20)
+	tracker := newIngestionProgressTracker(svc, uuid.New(), uuid.New(), uuid.New(), 20)
 	now = now.Add(5 * time.Second)
 	tracker.markMap(1, "Extracting")
 	_, _, _, _, _, eta := tracker.snapshot()
@@ -35,7 +35,7 @@ func TestIngestionProgressETAStartsAfterTenPercent(t *testing.T) {
 
 func TestIngestionProgressIsMonotonicAcrossOutOfOrderMapAndReduce(t *testing.T) {
 	svc := &IngestionService{}
-	tracker := newIngestionProgressTracker(svc, uuid.New(), uuid.New(), 4)
+	tracker := newIngestionProgressTracker(svc, uuid.New(), uuid.New(), uuid.New(), 4)
 	tracker.markMap(3, "Extracting chapter three")
 	_, processed, total, _, _, _ := tracker.snapshot()
 	if processed != 3 || total != 8 {
@@ -58,7 +58,7 @@ func TestIngestionProgressTickerPublishesAndStopsAtTerminal(t *testing.T) {
 	ticker := &fakeIngestionTicker{ch: make(chan time.Time, 2)}
 	hub := &mockIngestionHub{}
 	svc := &IngestionService{hub: hub, newProgressTicker: func(time.Duration) ingestionTicker { return ticker }}
-	tracker := newIngestionProgressTracker(svc, uuid.New(), uuid.New(), 4)
+	tracker := newIngestionProgressTracker(svc, uuid.New(), uuid.New(), uuid.New(), 4)
 	tracker.start()
 	tracker.publish()
 	before := len(hub.popMessages())

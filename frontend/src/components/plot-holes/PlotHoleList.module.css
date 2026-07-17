@@ -49,6 +49,9 @@
 }
 
 .chapterLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: transparent;
   border: none;
   color: var(--teal);

@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,5 +98,23 @@ func TestRecallItemGenericID(t *testing.T) {
 	}
 	if restored.ID != vectorItem.ID {
 		t.Errorf("after round-trip: ID = %q, want %q", restored.ID, vectorItem.ID)
+	}
+}
+
+func TestUniverseDoesNotSerializeDemoSessionID(t *testing.T) {
+	sessionID := "eyJhbGciOiJIUzI1NiJ9.legacy-token.signature"
+	u := Universe{
+		ID:        uuid.New(),
+		UserID:    uuid.New(),
+		Name:      "Private demo clone",
+		SessionID: &sessionID,
+	}
+
+	data, err := json.Marshal(u)
+	if err != nil {
+		t.Fatalf("marshal Universe: %v", err)
+	}
+	if strings.Contains(string(data), "session_id") || strings.Contains(string(data), sessionID) {
+		t.Fatalf("universe response leaked session data: %s", data)
 	}
 }

@@ -81,18 +81,23 @@ func (s *WorkService) GetByID(ctx context.Context, id uuid.UUID) (*models.Work, 
 	return s.workRepo.FindByID(ctx, id)
 }
 
+// GetByIDInUniverse re-reads a work inside its authorized parent scope.
+func (s *WorkService) GetByIDInUniverse(ctx context.Context, id, universeID uuid.UUID) (*models.Work, error) {
+	return s.workRepo.FindByIDInUniverse(ctx, id, universeID)
+}
+
 func (s *WorkService) ListByUniverse(ctx context.Context, universeID uuid.UUID) ([]models.Work, error) {
 	return s.workRepo.ListByUniverse(ctx, universeID)
 }
 
-func (s *WorkService) Update(ctx context.Context, id uuid.UUID, input models.CreateWorkRequest) (*models.Work, error) {
+func (s *WorkService) Update(ctx context.Context, id, universeID uuid.UUID, input models.CreateWorkRequest) (*models.Work, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	w, err := s.workRepo.FindByID(ctx, id)
+	w, err := s.workRepo.FindByIDInUniverse(ctx, id, universeID)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +115,7 @@ func (s *WorkService) Update(ctx context.Context, id uuid.UUID, input models.Cre
 		w.Synopsis = input.Synopsis
 	}
 
-	if err := s.workRepo.Update(ctx, tx, w); err != nil {
+	if err := s.workRepo.Update(ctx, tx, universeID, w); err != nil {
 		return nil, err
 	}
 
@@ -121,14 +126,14 @@ func (s *WorkService) Update(ctx context.Context, id uuid.UUID, input models.Cre
 	return w, nil
 }
 
-func (s *WorkService) Delete(ctx context.Context, id uuid.UUID) error {
+func (s *WorkService) Delete(ctx context.Context, id, universeID uuid.UUID) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	if err := s.workRepo.Delete(ctx, tx, id); err != nil {
+	if err := s.workRepo.Delete(ctx, tx, id, universeID); err != nil {
 		return err
 	}
 

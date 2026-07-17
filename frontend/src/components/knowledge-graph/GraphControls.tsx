@@ -23,9 +23,7 @@ export default function GraphControls() {
             className={styles.filterCheckbox}
             aria-label={`Toggle ${meta.label} entities`}
           />
-          <span className={`${styles.filterBadge} glyph`} style={{ background: meta.color }}>
-            {meta.glyph}
-          </span>
+          <span className={styles.filterBadge} style={{ background: meta.color }} aria-hidden="true" />
           <span className={styles.filterText}>{meta.label}</span>
         </label>
         )

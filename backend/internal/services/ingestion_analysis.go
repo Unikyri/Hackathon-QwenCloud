@@ -136,7 +136,10 @@ func (s *IngestionService) emitContradictionAlert(userID uuid.UUID, c models.Con
 	if s.hub == nil {
 		return
 	}
-	payload, err := json.Marshal(map[string]any{"contradiction": c})
+	payload, err := json.Marshal(models.ContradictionAlertPayload{
+		UniverseID:    c.UniverseID,
+		Contradiction: c,
+	})
 	if err != nil {
 		log.Printf("[ingestion] marshal contradiction_alert: %v", err)
 		return

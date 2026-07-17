@@ -6,61 +6,68 @@ interface BudgetTheaterProps {
   items: ExplainedItem[]
 }
 
-// Real BudgetReport fields (design obs #265) — no "system"/"user" categories
-// exist on the backend, so bars map 1:1 to entities/vector/tools tokens.
 const CATEGORIES: Array<{ key: keyof RecallBudget; label: string }> = [
   { key: 'entities_tokens', label: 'Entities' },
   { key: 'vector_tokens', label: 'Vector' },
   { key: 'tools_tokens', label: 'Tools' },
 ]
 
+function EvidenceList({ title, items, empty }: { title: string; items: ExplainedItem[]; empty: string }) {
+  return (
+    <section className={styles.evidenceGroup}>
+      <h3>{title}</h3>
+      {items.length === 0 ? <p>{empty}</p> : <ul>{items.map((item) => <li key={item.id}>{item.fact}</li>)}</ul>}
+    </section>
+  )
+}
+
 export default function BudgetTheater({ budget, items }: BudgetTheaterProps) {
   if (!budget) {
     return (
-      <div className={styles.wrap}>
-        <span className={styles.kicker}>Budget Theater</span>
-        <p className={styles.emptyPlaceholder}>Run a search above to see how the context budget is allocated</p>
-      </div>
+      <section className={styles.wrap} aria-labelledby="budget-title">
+        <p className={styles.kicker}>Context budget</p>
+        <h2 id="budget-title">What fit in the prompt</h2>
+        <p className={styles.emptyPlaceholder}>Run a recall above to see which real memories fit in the context window and which were held back.</p>
+      </section>
     )
   }
 
-  const fittedCount = items.filter((i) => i.fit_in_budget).length
-  const droppedCount = items.length - fittedCount
+  const fitted = items.filter((item) => item.fit_in_budget)
+  const dropped = items.filter((item) => !item.fit_in_budget)
 
   return (
-    <div className={styles.wrap}>
+    <section className={styles.wrap} aria-labelledby="budget-title">
       <div className={styles.header}>
-        <span className={styles.kicker}>Budget Theater</span>
-        <div className={styles.headerRight}>
-          <span className={styles.usedPercent}>{budget.used_percent}% of window used</span>
-          <p className={styles.hint}>Tokens reserved for response overhead</p>
+        <div>
+          <p className={styles.kicker}>Context budget</p>
+          <h2 id="budget-title">What fit in the prompt</h2>
         </div>
+        <span className={styles.usedPercent}>{budget.used_percent}% used</span>
       </div>
+      <p className={styles.hint}>The response has reserved room; these values describe the actual budget returned by the recall API.</p>
 
       <div className={styles.bars}>
         {CATEGORIES.map(({ key, label }) => {
           const value = budget[key] as number
-          const pct = budget.max_context_tokens > 0 ? Math.min(100, (value / budget.max_context_tokens) * 100) : 0
+          const percentage = budget.max_context_tokens > 0 ? Math.min(100, (value / budget.max_context_tokens) * 100) : 0
           return (
             <div key={key} className={styles.barRow} data-testid={`budget-bar-${key}`}>
               <span className={styles.barLabel}>{label}</span>
-              <div className={styles.barTrack}>
-                <div className={styles.barFill} style={{ width: `${pct}%` }} />
-              </div>
-              <span className={styles.barValue}>
-                {key === 'vector_tokens'
-                  ? `${(budget.vector_tokens_used ?? 0).toLocaleString()} / ${value.toLocaleString()} tok`
-                  : `${value.toLocaleString()} tok`}
-              </span>
+              <div className={styles.barTrack} aria-hidden="true"><div className={styles.barFill} style={{ width: `${percentage}%` }} /></div>
+              <span className={styles.barValue}>{key === 'vector_tokens' ? `${(budget.vector_tokens_used ?? 0).toLocaleString()} / ${value.toLocaleString()} tok` : `${value.toLocaleString()} tok`}</span>
             </div>
           )
         })}
       </div>
 
       <div className={styles.counts}>
-        <span className={styles.fittedCount} data-testid="budget-fitted-count">Fitted: {fittedCount}</span>
-        <span className={styles.droppedCount} data-testid="budget-dropped-count">Dropped: {droppedCount}</span>
+        <span className={styles.fittedCount} data-testid="budget-fitted-count">Included: {fitted.length}</span>
+        <span className={styles.droppedCount} data-testid="budget-dropped-count">Held back: {dropped.length}</span>
       </div>
-    </div>
+      <div className={styles.evidenceGrid}>
+        <EvidenceList title="Included in context" items={fitted} empty="No retrieved items fit the available context budget." />
+        <EvidenceList title="Held back" items={dropped} empty="Every retrieved item fit the available context budget." />
+      </div>
+    </section>
   )
 }

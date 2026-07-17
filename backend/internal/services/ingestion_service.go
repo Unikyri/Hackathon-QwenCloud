@@ -453,7 +453,7 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 			msg = err.Error()
 		}
 		s.updateJobStatus(ctx, jobID, "failed", msg)
-		s.emitProgress(jobID, ownerID, "failed", 0, 0)
+		s.emitProgress(jobID, ownerID, universeID, "failed", 0, 0)
 		// The failed job row (with its error_message) is the durable record of
 		// this attempt — it must survive so a reload shows "upload failed: …"
 		// instead of nothing. We deliberately do NOT delete the Work here:
@@ -486,7 +486,7 @@ func (s *IngestionService) runWorker(jobID, universeID, workID uuid.UUID, conten
 	}
 
 	entitiesTotal := 0
-	progress := newIngestionProgressTracker(s, jobID, ownerID, len(chunks))
+	progress := newIngestionProgressTracker(s, jobID, ownerID, universeID, len(chunks))
 	progress.start()
 	defer progress.stop()
 	mapResults := s.mapChunks(ctx, chunks, func(completed, chunkIndex int) {
@@ -1132,27 +1132,23 @@ func (s *IngestionService) persistMention(ctx context.Context, entityID, chapter
 
 // emitProgress sends an ingestion_progress WebSocket event to the resolved
 // universe owner.
-func (s *IngestionService) emitProgress(jobID, userID uuid.UUID, status string, processed, total int) {
-	s.emitProgressDetails(jobID, userID, status, processed, total, "", nil)
+func (s *IngestionService) emitProgress(jobID, userID, universeID uuid.UUID, status string, processed, total int) {
+	s.emitProgressDetails(jobID, userID, universeID, status, processed, total, "", nil)
 }
 
-func (s *IngestionService) emitProgressDetails(jobID, userID uuid.UUID, status string, processed, total int, action string, etaSeconds *int) {
+func (s *IngestionService) emitProgressDetails(jobID, userID, universeID uuid.UUID, status string, processed, total int, action string, etaSeconds *int) {
 	if s.hub == nil {
 		return
 	}
-	payloadMap := map[string]any{
-		"job_id":             jobID.String(),
-		"status":             status,
-		"chapters_processed": processed,
-		"total_chapters":     total,
-	}
-	if action != "" {
-		payloadMap["action"] = action
-	}
-	if etaSeconds != nil {
-		payloadMap["eta_seconds"] = *etaSeconds
-	}
-	payload, _ := json.Marshal(payloadMap)
+	payload, _ := json.Marshal(models.IngestionProgressPayload{
+		JobID:             jobID,
+		UniverseID:        universeID,
+		Status:            status,
+		ChaptersProcessed: processed,
+		TotalChapters:     total,
+		Action:            action,
+		ETASeconds:        etaSeconds,
+	})
 	msg := models.WSMessage{
 		Type:    "ingestion_progress",
 		Payload: payload,

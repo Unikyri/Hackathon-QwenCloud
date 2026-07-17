@@ -13,6 +13,13 @@ import (
 type TimelineHandler struct {
 	timelineSvc  *services.TimelineService
 	timelineRepo *repositories.TimelineRepo
+	ownerRepo    universeOwnerResolver
+}
+
+// SetUniverseOwnerRepo enables production ownership checks without changing
+// the existing constructor contract.
+func (h *TimelineHandler) SetUniverseOwnerRepo(repo universeOwnerResolver) {
+	h.ownerRepo = repo
 }
 
 // NewTimelineHandler creates a timeline handler.
@@ -31,6 +38,9 @@ func (h *TimelineHandler) ListByUniverse(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe_id"},
 		})
+	}
+	if err := authorizeUniverse(c, h.ownerRepo, universeID); err != nil {
+		return universeAccessError(c, err)
 	}
 
 	events, err := h.timelineRepo.ListByUniverse(c.Context(), universeID)
@@ -53,6 +63,9 @@ func (h *TimelineHandler) Create(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fiber.Map{"code": "VALIDATION_ERROR", "message": "Invalid universe_id"},
 		})
+	}
+	if err := authorizeUniverse(c, h.ownerRepo, universeID); err != nil {
+		return universeAccessError(c, err)
 	}
 
 	var req models.TimelineEvent

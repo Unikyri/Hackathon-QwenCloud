@@ -31,7 +31,6 @@ const contradictions: Contradiction[] = [
 describe('ContradictionList', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    window.confirm = vi.fn(() => true)
   })
 
   it('renders severity pill, dual evidence panels and suggestion', () => {
@@ -46,6 +45,9 @@ render(<ContradictionList universeId="uni-1" contradictions={contradictions} />)
   it('resolves a contradiction and dims the card', async () => {
     render(<ContradictionList universeId="uni-1" contradictions={contradictions} />)
     fireEvent.click(screen.getByRole('button', { name: /resolve/i }))
+    expect(screen.getByRole('group', { name: /resolve contradiction/i })).toBeInTheDocument()
+    expect(mockResolve).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm resolve' }))
     await waitFor(() => expect(mockResolve).toHaveBeenCalledWith('uni-1', 'c1'))
     expect(screen.getByText(/Resolved/)).toBeInTheDocument()
   })

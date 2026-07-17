@@ -6,6 +6,18 @@ import IngestPage from '../IngestPage'
 
 vi.mock('../IngestPage.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
 
+const mockRouteParams = vi.hoisted(() => ({ universeId: 'uni-1' }))
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
+  return { ...actual, useParams: () => mockRouteParams }
+})
+
+const mockPublish = vi.fn(() => 'feedback-id')
+const mockUpdate = vi.fn()
+vi.mock('../../components/feedback', () => ({
+  useFeedback: () => ({ publish: mockPublish, update: mockUpdate }),
+}))
+
 const mockIngestDocument = vi.fn()
 const mockListIngestionJobs = vi.fn()
 vi.mock('../../lib/api', () => ({
@@ -30,9 +42,9 @@ vi.mock('../../hooks/useWS', () => ({
   useWS: () => ({ status: 'open' }),
 }))
 
-function renderPage(universeId = 'uni-1') {
-  return render(
-    <MemoryRouter initialEntries={[`/universe/${universeId}/ingest`]}>
+function pageTree() {
+  return (
+    <MemoryRouter initialEntries={[`/universe/${mockRouteParams.universeId}/ingest`]}>
       <Routes>
         <Route path="/universe/:universeId/ingest" element={<IngestPage />} />
       </Routes>
@@ -40,46 +52,52 @@ function renderPage(universeId = 'uni-1') {
   )
 }
 
+function renderPage(universeId = 'uni-1') {
+  mockRouteParams.universeId = universeId
+  return render(pageTree())
+}
+
 describe('IngestPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockRouteParams.universeId = 'uni-1'
     mockIngestionProgress = {}
     mockListIngestionJobs.mockResolvedValue({ jobs: [] })
   })
 
-  it('renders the dropzone', () => {
+  it('renders the dropzone', async () => {
     renderPage()
-    expect(screen.getByText(/Drag a \.md, \.txt, \.pdf, or \.docx file/)).toBeInTheDocument()
+    expect(await screen.findByText('Choose a manuscript or drop it here')).toBeInTheDocument()
   })
 
   it('rejects unsupported file types without calling the API', async () => {
     renderPage()
-    const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
+    const input = await screen.findByTestId('ingest-file-input') as HTMLInputElement
     const file = new File(['binary'], 'cover.png', { type: 'image/png' })
 
     const user = userEvent.setup()
     await user.upload(input, file)
 
     expect(mockIngestDocument).not.toHaveBeenCalled()
-    expect(screen.getByText('Only .md, .txt, .pdf, and .docx files are supported')).toBeInTheDocument()
+    expect(await screen.findByText('Only .md, .txt, .pdf, and .docx files are supported.')).toBeInTheDocument()
   })
 
   it('rejects legacy .doc files without calling the API', async () => {
     renderPage()
-    const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
+    const input = await screen.findByTestId('ingest-file-input') as HTMLInputElement
     const file = new File(['binary'], 'manuscript.doc', { type: 'application/msword' })
 
     const user = userEvent.setup()
     await user.upload(input, file)
 
     expect(mockIngestDocument).not.toHaveBeenCalled()
-    expect(screen.getByText('Only .md, .txt, .pdf, and .docx files are supported')).toBeInTheDocument()
+    expect(await screen.findByText('Only .md, .txt, .pdf, and .docx files are supported.')).toBeInTheDocument()
   })
 
   it('uploads an accepted file and lists it as a job', async () => {
     mockIngestDocument.mockResolvedValue({ job_id: 'job-1', status: 'accepted' })
     renderPage()
-    const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
+    const input = await screen.findByTestId('ingest-file-input') as HTMLInputElement
     const file = new File(['# Chapter 1'], 'manuscript.md', { type: 'text/markdown' })
 
     const user = userEvent.setup()
@@ -187,7 +205,7 @@ describe('IngestPage', () => {
       ],
     })
 
-    const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
+    const input = await screen.findByTestId('ingest-file-input') as HTMLInputElement
     const file = new File(['# Chapter 1'], 'manuscript.md', { type: 'text/markdown' })
     const user = userEvent.setup()
     await user.upload(input, file)
@@ -205,7 +223,7 @@ describe('IngestPage', () => {
       'job-1': { job_id: 'job-1', status: 'running', chapters_processed: 2, total_chapters: 4, action: 'Extracting entities from chapter 2…', eta_seconds: 18 },
     }
     renderPage()
-    const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
+    const input = await screen.findByTestId('ingest-file-input') as HTMLInputElement
     const file = new File(['# Chapter 1'], 'manuscript.md', { type: 'text/markdown' })
 
     const user = userEvent.setup()
@@ -225,7 +243,7 @@ describe('IngestPage', () => {
       'job-1': { job_id: 'job-1', status: 'completed', chapters_processed: 4, total_chapters: 4 },
     }
     renderPage()
-    const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
+    const input = await screen.findByTestId('ingest-file-input') as HTMLInputElement
     const file = new File(['# Chapter 1'], 'manuscript.md', { type: 'text/markdown' })
 
     const user = userEvent.setup()
@@ -242,7 +260,7 @@ describe('IngestPage', () => {
       'job-1': { job_id: 'job-1', status: 'completed', chapters_processed: 0, total_chapters: 0 },
     }
     renderPage()
-    const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
+    const input = await screen.findByTestId('ingest-file-input') as HTMLInputElement
     const file = new File([''], 'empty.md', { type: 'text/markdown' })
 
     const user = userEvent.setup()
@@ -253,13 +271,13 @@ describe('IngestPage', () => {
     })
   })
 
-  it('does not drop a just-uploaded job when the initial fetch resolves late', async () => {
+  it('keeps a just-uploaded job current when the initial fetch resolves late', async () => {
     let resolveFetch!: (v: { jobs: unknown[] }) => void
     mockListIngestionJobs.mockReturnValue(new Promise((r) => { resolveFetch = r }))
     mockIngestDocument.mockResolvedValue({ job_id: 'job-new', status: 'accepted' })
     renderPage()
 
-    const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
+    const input = await screen.findByTestId('ingest-file-input') as HTMLInputElement
     const file = new File(['# Chapter 1'], 'fresh.md', { type: 'text/markdown' })
     const user = userEvent.setup()
     await user.upload(input, file)
@@ -282,8 +300,8 @@ describe('IngestPage', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByText('old.md')).toBeInTheDocument()
-      // The optimistic card from the racing upload must survive the merge.
+      // The active upload remains the single visible status even after the
+      // historical list arrives late.
       expect(screen.getByText('fresh.md')).toBeInTheDocument()
     })
   })
@@ -296,7 +314,7 @@ describe('IngestPage', () => {
     renderPage()
     await waitFor(() => expect(mockListIngestionJobs).toHaveBeenCalledTimes(1))
 
-    const input = screen.getByTestId('ingest-file-input') as HTMLInputElement
+    const input = await screen.findByTestId('ingest-file-input') as HTMLInputElement
     const file = new File(['# Chapter 1'], 'manuscript.md', { type: 'text/markdown' })
 
     const user = userEvent.setup()
@@ -306,5 +324,38 @@ describe('IngestPage', () => {
     await user.click(checkStatusBtn)
 
     expect(mockListIngestionJobs).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores a deferred A job list after the route changes to B', async () => {
+    let resolveA!: (value: { jobs: unknown[] }) => void
+    let resolveB!: (value: { jobs: unknown[] }) => void
+    mockListIngestionJobs.mockImplementation((universeId: string) => new Promise((resolve) => {
+      if (universeId === 'uni-a') resolveA = resolve
+      else resolveB = resolve
+    }))
+
+    const view = renderPage('uni-a')
+    await waitFor(() => expect(mockListIngestionJobs).toHaveBeenCalledWith('uni-a'))
+
+    mockRouteParams.universeId = 'uni-b'
+    view.rerender(pageTree())
+    await waitFor(() => expect(mockListIngestionJobs).toHaveBeenCalledWith('uni-b'))
+
+    resolveB({
+      jobs: [{
+        id: 'job-b', universe_id: 'uni-b', work_id: 'work-b', filename: 'universe-b.md', status: 'completed',
+        total_chapters_detected: 1, chapters_processed: 1,
+      }],
+    })
+    await waitFor(() => expect(screen.getByText('universe-b.md')).toBeInTheDocument())
+
+    resolveA({
+      jobs: [{
+        id: 'job-a', universe_id: 'uni-a', work_id: 'work-a', filename: 'universe-a.md', status: 'completed',
+        total_chapters_detected: 1, chapters_processed: 1,
+      }],
+    })
+    await waitFor(() => expect(screen.getByText('universe-b.md')).toBeInTheDocument())
+    expect(screen.queryByText('universe-a.md')).not.toBeInTheDocument()
   })
 })

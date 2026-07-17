@@ -6,6 +6,49 @@ interface RequestOptions extends RequestInit {
   json?: unknown
 }
 
+export interface DemoUniverseResponse {
+  status: 'success'
+  universe_id: string
+  message: string
+}
+
+// The neighborhood endpoint is deliberately separate from the legacy /graph
+// response. It is a real AGE traversal, not a renderer-shaped graph payload.
+export interface GraphNeighborNodeDTO {
+  id: string
+  labels?: string[]
+  properties: {
+    raw?: unknown
+    [key: string]: unknown
+  }
+}
+
+export interface GraphNeighborEdgeDTO {
+  id: string
+  source: string
+  target: string
+  type: string
+  properties?: Record<string, unknown>
+}
+
+// The server always describes the bounded traversal that produced a map. The
+// client uses this contract to keep fCoSE away from unbounded graph data and
+// to tell the writer when a focused neighborhood is partial.
+export interface GraphTraversalLimitsDTO {
+  hops: number
+  max_hops: number
+  node_limit: number
+  edge_limit: number
+  result_limit: number
+}
+
+export interface EntityNeighborhoodDTO {
+  nodes: GraphNeighborNodeDTO[]
+  edges: GraphNeighborEdgeDTO[]
+  truncated: boolean
+  limits: GraphTraversalLimitsDTO
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { json, ...fetchOptions } = options
   const token = localStorage.getItem('token')
@@ -55,13 +98,13 @@ export const api = {
 
   // Demo
   demoClone: (sessionId: string) =>
-    request<{ universe_id: string }>('/demo/clone', {
+    request<DemoUniverseResponse>('/demo/clone', {
       method: 'POST',
       headers: { 'X-Session-ID': sessionId } as Record<string, string>,
     }),
 
   demoReset: (sessionId: string) =>
-    request<{ ok: boolean }>('/demo/reset', {
+    request<DemoUniverseResponse>('/demo/reset', {
       method: 'POST',
       headers: { 'X-Session-ID': sessionId } as Record<string, string>,
     }),
@@ -131,10 +174,7 @@ export const api = {
     request<{ entity?: any }>(`/candidates/${candidateId}/merge`, { method: 'POST', json: { target_entity_id: targetEntityId } }),
 
   getEntityNeighbors: (id: string, universeId: string, hops = 1) =>
-    request<{
-      nodes: Array<{ id: string; properties: Record<string, unknown> }>
-      edges: Array<{ id: string; properties: Record<string, unknown> }>
-    }>(`/entities/${id}/neighbors?universe_id=${universeId}&hops=${hops}`),
+    request<EntityNeighborhoodDTO>(`/entities/${id}/neighbors?universe_id=${universeId}&hops=${hops}`),
 
   // Health
   health: () => request<any>('/health'),
@@ -179,11 +219,11 @@ export const api = {
       }>
     }>(`/universes/${universeId}/plot-holes`),
 
-  getGraph: (universeId: string) =>
-    request<{
-      nodes: Array<{ id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }>
-      edges: Array<{ id: string; source: string; target: string; label: string }>
-    }>(`/universes/${universeId}/graph`),
+  resolvePlotHole: (universeId: string, id: string) =>
+    request<void>(`/universes/${universeId}/plot-holes/${id}/resolve`, { method: 'PUT' }),
+
+  dismissPlotHole: (universeId: string, id: string) =>
+    request<void>(`/universes/${universeId}/plot-holes/${id}/dismiss`, { method: 'PUT' }),
 
   recall: (universeId: string, query: string, k: number) =>
     request<{ items: Array<{ id: string; fact: string; score: number; entity_id?: string }> }>(

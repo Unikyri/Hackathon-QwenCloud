@@ -1,53 +1,71 @@
 :root {
-  /* Manuscript-modern palette: teal / gold / tan */
-  --bg-app: #eae1cf;
-  --bg-sidebar: #efe7d3;
-  --bg-header: #f2ecdd;
-  --bg-card: #f6f1e6;
-  --bg-input: #f2ecdd;
-  --bg-rail: #f2ecdd;
-  --bg-graph: #e6ddc9;
-  --surface-sunken: #eae1cf;
+  color-scheme: light;
 
-  --ink: #2b2620;
-  --ink-body: #332e26;
-  --ink-soft: #4a4238;
-  --muted: #6f6656;
-  --muted-2: #6b6455; /* darkened from #736c5b: that value only cleared 4.5:1 against --bg-card (4.63:1) but failed against --bg-app (~4.02:1), --bg-input/--bg-header/--bg-rail (~4.43:1), and --bg-sidebar (~4.23:1) — all backgrounds this token is painted on per index.css usage. #6b6455 clears 4.5:1 against the worst case (--bg-app, ~4.52:1; see src/lib/contrast.ts) */
-  --muted-3: #b7ad96;
+  /* Quiet Studio semantic palette: paper, ink, pine, amber, coral, and memory violet. */
+  --color-canvas: #f8f7f2;
+  --color-paper: #fffefa;
+  --color-paper-muted: #f1f3ee;
+  --color-ink: #192321;
+  --color-ink-body: #24302d;
+  --color-ink-soft: #3e4d49;
+  --color-ink-muted: #52605b;
+  --color-pine: #155e58;
+  --color-pine-deep: #0f4743;
+  --color-amber: #8a5d00;
+  --color-coral: #a23d33;
+  --color-violet: #605198;
+  --color-focus: #0c6a85;
+  --color-on-accent: #fffefa;
 
-  --teal: #2f5d54;
-  --teal-deep: #234b43;
-  --gold: #dda94a; /* nudged from #d9a441: original only reached ~4.32:1 on --teal-deep (fails WCAG AA 4.5:1 for the mono kickers/CTA text that use it); this reaches ~4.56:1 */
-  --gold-ink: #8a6a1f; /* on-light gold text (e.g. serif numerals on tan bg) — plain --gold fails badly (~1.7:1) on tan surfaces */
-  --parchment-hi: #f4ecdd;
-  --teal-tint-on-dark: #c2d1cb;
-  --teal-tint-on-dark-2: #b6c8c1;
+  /* Existing component tokens map to the semantic palette during the refactor. */
+  --bg-app: var(--color-canvas);
+  --bg-sidebar: var(--color-paper-muted);
+  --bg-header: var(--color-paper);
+  --bg-card: var(--color-paper);
+  --bg-input: var(--color-paper);
+  --bg-rail: var(--color-paper-muted);
+  --bg-graph: #edf0ea;
+  --surface-sunken: var(--color-paper-muted);
 
-  --line: rgba(43, 38, 32, 0.1);
-  --line-2: rgba(43, 38, 32, 0.07);
-  --line-strong: rgba(43, 38, 32, 0.14);
-  --hover: rgba(43, 38, 32, 0.05);
-  --teal-soft: rgba(47, 93, 84, 0.1);
-  --teal-soft-12: rgba(47, 93, 84, 0.12);
-  --gold-soft: rgba(181, 132, 47, 0.12);
+  --ink: var(--color-ink);
+  --ink-body: var(--color-ink-body);
+  --ink-soft: var(--color-ink-soft);
+  --muted: var(--color-ink-muted);
+  --muted-2: #52605b;
+  --muted-3: #9ca7a2;
 
-  --danger: #954827; /* darkened from #a8542f: original only reached ~3.9-4.48:1 on tan backgrounds as small text (fails WCAG AA 4.5:1); this reaches >=4.81:1. --danger-deep/--danger-bg unaffected (decorative border/bg only, not used as text) */
-  --danger-deep: #c0533a;
-  --danger-bg: #f7ece3;
-  --danger-border: rgba(168, 84, 47, 0.25);
-  --warning: #7d5a1c; /* darkened from #b5842f: original only reached ~2.5-3.0:1 on tan backgrounds (fails WCAG AA) when used as text/label color; this reaches >=4.5:1 */
-  --success: #356b47; /* darkened from #3f7a4f: original only reached ~3.7-4.34:1 on tan backgrounds as small text (fails WCAG AA 4.5:1); this reaches >=4.65:1. --success-2 unaffected (not used as text) */
-  --success-2: #5a7a52;
-  --conflict-dash: #d98b63;
+  --teal: var(--color-pine);
+  --teal-deep: var(--color-pine-deep);
+  --gold: #f2c65a;
+  --gold-ink: var(--color-amber);
+  --parchment-hi: var(--color-on-accent);
+  --teal-tint-on-dark: #d6e5df;
+  --teal-tint-on-dark-2: #bfd3cb;
+
+  --line: rgba(25, 35, 33, 0.12);
+  --line-2: rgba(25, 35, 33, 0.08);
+  --line-strong: rgba(25, 35, 33, 0.2);
+  --hover: rgba(21, 94, 88, 0.08);
+  --teal-soft: rgba(21, 94, 88, 0.1);
+  --teal-soft-12: rgba(21, 94, 88, 0.14);
+  --gold-soft: rgba(138, 93, 0, 0.12);
+
+  --danger: var(--color-coral);
+  --danger-deep: #7f3029;
+  --danger-bg: #fbebe8;
+  --danger-border: rgba(162, 61, 51, 0.28);
+  --warning: var(--color-amber);
+  --success: #2e6a50;
+  --success-2: #4d8069;
+  --conflict-dash: #cb735c;
 
   /* Categorical node-type palette (Knowledge Graph) — 6 backend entity types */
-  --node-character: #2f5d54;
-  --node-place: #5a7a52;
-  --node-event: #b5842f;
-  --node-faction: #6f6656;
-  --node-worldrule: #4e8073;
-  --node-plotarc: #a8542f;
+  --node-character: var(--color-pine);
+  --node-place: #4d8069;
+  --node-event: var(--color-amber);
+  --node-faction: #52605b;
+  --node-worldrule: #337c73;
+  --node-plotarc: var(--color-coral);
 
   /* Typography */
   --serif: 'Newsreader', Georgia, 'Times New Roman', serif; /* titles, editor body, numerals */
@@ -100,6 +118,17 @@
 @keyframes qshimmer {
   0% { background-position: -400px 0; }
   100% { background-position: 400px 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Skeleton shimmer block */
@@ -232,3 +261,25 @@ textarea::placeholder {
 
 .error { color: var(--danger); }
 .success { color: var(--success); }
+
+.skip-link {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 1000;
+  padding: 10px 14px;
+  color: var(--color-on-accent);
+  background: var(--teal-deep);
+  border-radius: var(--r-sm);
+  transform: translateY(-150%);
+  transition: transform 0.15s ease;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 3px;
+}

@@ -20,6 +20,7 @@ import (
 	"github.com/quill/backend/internal/handlers"
 	"github.com/quill/backend/internal/mcp"
 	"github.com/quill/backend/internal/middleware"
+	"github.com/quill/backend/internal/observability"
 	"github.com/quill/backend/internal/repositories"
 	"github.com/quill/backend/internal/services"
 	"github.com/quill/backend/internal/ws"
@@ -35,6 +36,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load skill registry: %v", err)
 	}
+	telemetry := observability.NewDefault()
 
 	// Connect to database
 	ctx := context.Background()
@@ -155,7 +157,7 @@ func main() {
 	analysisSvc := services.NewAnalysisService(pool, entitySvc, contraSvc, relevSvc, timelineSvc, plotHoleSvc, llmSvc, hub, memorySvc)
 
 	// Wire the analysis service into the hub (now both exist)
-	hub.SetSubmitter(analysisSvc)
+	hub.SetSubmitter(telemetry.InstrumentParagraphSubmitter(analysisSvc))
 
 	// Ingestion service (async document upload pipeline)
 	ingestionSvc := services.NewIngestionService(pool, entitySvc, vectorRepo, graphRepo, llmSvc, hub)
@@ -166,10 +168,13 @@ func main() {
 
 	authH := handlers.NewAuthHandler(authSvc)
 	universeH := handlers.NewUniverseHandler(universeSvc)
+	universeH.SetUniverseOwnerRepo(universeRepo)
 	workH := handlers.NewWorkHandler(workSvc)
+	workH.SetOwnershipRepos(universeRepo, workRepo)
 	chapterH := handlers.NewChapterHandler(chapterSvc)
 	chapterH.SetOwnershipRepos(universeRepo, workRepo, chapterRepo)
 	entityH := handlers.NewEntityHandler(entitySvc)
+	entityH.SetUniverseOwnerRepo(universeRepo)
 	candidateH := handlers.NewEntityCandidateHandler(entitySvc, universeRepo, writerMemorySvc)
 	healthH := handlers.NewHealthHandler(pool, llmSvc, cfg)
 	demoH := handlers.NewDemoHandler(demoSvc)
@@ -177,8 +182,11 @@ func main() {
 
 	// Phase 2a handlers
 	contradictionH := handlers.NewContradictionHandler(contraSvc, contradictionRepo)
+	contradictionH.SetUniverseOwnerRepo(universeRepo)
 	timelineH := handlers.NewTimelineHandler(timelineSvc, timelineRepo)
+	timelineH.SetUniverseOwnerRepo(universeRepo)
 	plotHoleH := handlers.NewPlotHoleHandler(plotHoleSvc).WithRepo(plotHoleRepo)
+	plotHoleH.SetUniverseOwnerRepo(universeRepo)
 	graphH := handlers.NewGraphHandler(graphRepo, memorySvc, entityRepo, llmSvc)
 	graphH.SetDecayer(relevSvc)
 	graphH.SetWriterMemoryDecayer(writerMemorySvc)
@@ -197,11 +205,13 @@ func main() {
 	})
 
 	// Middleware
+	app.Use(telemetry.Middleware())
 	app.Use(recover.New())
 	app.Use(middleware.CORSMiddleware(cfg.AllowedOrigins))
 
 	// Health (public)
 	app.Get("/api/v1/health", healthH.Check)
+	app.Get("/api/v1/status", telemetry.Status)
 
 	// Auth (public)
 	auth := app.Group("/api/v1/auth")
@@ -263,6 +273,8 @@ func main() {
 	api.Get("/universes/:universe_id/timeline", timelineH.ListByUniverse)
 	api.Post("/universes/:universe_id/timeline", timelineH.Create)
 	api.Get("/universes/:universe_id/plot-holes", plotHoleH.ListByUniverse)
+	api.Put("/universes/:universe_id/plot-holes/:id/resolve", plotHoleH.Resolve)
+	api.Put("/universes/:universe_id/plot-holes/:id/dismiss", plotHoleH.Dismiss)
 	api.Get("/universes/:universe_id/graph", graphH.FullGraph)
 	api.Get("/entities/:id/neighbors", graphH.Neighbors)
 	api.Post("/universes/:id/recall", graphH.Recall)
@@ -281,9 +293,9 @@ func main() {
 	api.Post("/users/me/preferences/:id/deactivate", writerMemoryH.Deactivate)
 	api.Post("/users/me/preferences/feedback", writerMemoryH.Feedback)
 
-	// Demo (public)
-	app.Post("/api/v1/demo/clone", demoH.Clone)
-	app.Post("/api/v1/demo/reset", demoH.Reset)
+	// Demo (authenticated)
+	api.Post("/demo/clone", demoH.Clone)
+	api.Post("/demo/reset", demoH.Reset)
 
 	// ── Graceful Shutdown Setup ──
 

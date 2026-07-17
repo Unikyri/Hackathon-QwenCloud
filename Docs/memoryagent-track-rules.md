@@ -1,6 +1,11 @@
 # Track 1: MemoryAgent — Rules & Evaluation Criteria
 ### Global AI Hackathon Series with Qwen Cloud
 
+> **Status:** This is a local planning snapshot, not the submission contract. It was stale
+> in the Sprint 7 plan and has been refreshed against the [official Devpost
+> rules](https://qwencloud-hackathon.devpost.com/rules), which prevail if anything changes.
+> The current submission deadline is **July 20, 2026 at 2:00 PM Pacific Time**.
+
 ---
 
 ## 1. Track Overview
@@ -34,7 +39,7 @@ Every submission (regardless of track) must include:
 8. *(Optional)* Blog/social post link documenting the build journey, to qualify for the Blog Post bonus prize.
 
 Additional general rules that apply:
-- Project must be **new or significantly updated** during the Submission Period (May 26 – Jul 9, 2026).
+- Project must be **new or significantly updated** during the Submission Period (May 26 – Jul 20, 2026).
 - Must be functional, testable, and free of malicious code.
 - Must not infringe third-party IP; any third-party SDKs/APIs/data must be properly licensed.
 - English required (or English translations of all materials).
@@ -96,10 +101,10 @@ Judges will specifically be looking for how well the submission demonstrates:
 
 ---
 
-## 6. Key Dates
+## 6. Key Dates (official snapshot)
 
 | Milestone | Date |
 |---|---|
-| Submission Period | May 26, 2026 (8:00 AM PT) – Jul 9, 2026 (2:00 PM PT) |
-| Judging Period | Jul 10, 2026 (8:00 AM PT) – Jul 31, 2026 (2:00 PM PT) |
-| Winners Announced | On or around Aug 7, 2026 (2:00 PM PT) |
+| Submission Period | May 26, 2026 (8:00 AM Pacific Time) – Jul 20, 2026 (2:00 PM Pacific Time) |
+| Judging Period | Jul 28, 2026 (8:00 AM Pacific Time) – Aug 11, 2026 (2:00 PM Pacific Time) |
+| Winners Announced | On or around Aug 17, 2026 (2:00 PM Pacific Time) |

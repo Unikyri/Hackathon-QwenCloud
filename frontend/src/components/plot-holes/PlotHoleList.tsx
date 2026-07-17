@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { ArrowRight } from 'lucide-react'
 import styles from './PlotHoleList.module.css'
 
 export interface PlotHole {
@@ -34,9 +35,11 @@ export default function PlotHoleList({ plotHoles, universeId }: PlotHoleListProp
             {ph.first_mentioned_chapter_id && (
               <button
                 className={styles.chapterLink}
+                type="button"
                 onClick={() => navigate(`/universe/${universeId}/editor/${ph.first_mentioned_chapter_id}`)}
               >
-                Go to chapter →
+                <span>Go to chapter</span>
+                <ArrowRight aria-hidden="true" size={15} strokeWidth={2} />
               </button>
             )}
           </div>

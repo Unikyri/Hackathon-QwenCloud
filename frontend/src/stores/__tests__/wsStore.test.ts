@@ -69,6 +69,7 @@ beforeEach(() => {
     status: 'idle',
     lastError: null,
     reconnectAttempt: 0,
+    activeUniverseId: null,
     analysisResults: [],
     contradictions: [],
     discoveredEntities: [],
@@ -178,6 +179,25 @@ describe('wsStore', () => {
       expect(JSON.parse(ws.sentMessages[1]).payload.submission_id).toBe('submission-1')
     })
 
+    it('applies a same-universe terminal event after a queued retry reconnects', () => {
+      getStore().setUniverseScope('uni-a')
+      getStore().send({
+        type: 'paragraph_submit',
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', universe_id: 'uni-a', text: 'hello' },
+      })
+
+      getStore().connect('test-token')
+      const ws = MockWebSocket.instances[0]
+      ws.simulateOpen()
+      ws.simulateMessage({
+        type: 'analysis_result',
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', universe_id: 'uni-a' },
+      })
+
+      expect(getStore().submissions['submission-1']?.phase).toBe('done')
+      expect(getStore().analysisResults).toHaveLength(1)
+    })
+
     it('bounds the outbound queue and makes an overflow visible as failed', () => {
       getStore().connect('test-token')
       const ws = MockWebSocket.instances[0]
@@ -199,11 +219,12 @@ describe('wsStore', () => {
     beforeEach(() => {
       getStore().connect('test-token')
       MockWebSocket.instances[0].simulateOpen()
+      getStore().setUniverseScope('uni-a')
     })
 
     it('dispatches analysis_result to analysisResults slice', () => {
       const ws = MockWebSocket.instances[0]
-      ws.simulateMessage({ type: 'analysis_result', payload: { content: 'analysis' } })
+      ws.simulateMessage({ type: 'analysis_result', payload: { universe_id: 'uni-a', content: 'analysis' } })
       expect(getStore().analysisResults).toHaveLength(1)
       expect(getStore().analysisResults[0].content).toBe('analysis')
     })
@@ -212,26 +233,88 @@ describe('wsStore', () => {
       const ws = MockWebSocket.instances[0]
       getStore().send({
         type: 'paragraph_submit',
-        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', text: 'hello' },
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', universe_id: 'uni-a', text: 'hello' },
       })
       ws.simulateMessage({
         type: 'analysis_progress',
-        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', stage: 'entities_extracted' },
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', universe_id: 'uni-a', stage: 'entities_extracted' },
       })
       expect(getStore().submissions['submission-1']?.phase).toBe('analyzing')
 
       ws.simulateMessage({
         type: 'analysis_result',
-        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter' },
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', universe_id: 'uni-a' },
       })
       expect(getStore().submissions['submission-1']?.phase).toBe('done')
+    })
+
+    it('ignores missing or foreign correlation and applies the matching universe event', () => {
+      const ws = MockWebSocket.instances[0]
+      getStore().send({
+        type: 'paragraph_submit',
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', universe_id: 'uni-a', text: 'hello' },
+      })
+
+      ws.simulateMessage({ type: 'analysis_result', payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1' } })
+      ws.simulateMessage({ type: 'analysis_result', payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', universe_id: 'uni-b' } })
+      expect(getStore().submissions['submission-1']?.phase).toBe('submitted')
+      expect(getStore().analysisResults).toEqual([])
+
+      ws.simulateMessage({ type: 'analysis_result', payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', universe_id: 'uni-a' } })
+      expect(getStore().submissions['submission-1']?.phase).toBe('done')
+      expect(getStore().analysisResults).toHaveLength(1)
+    })
+
+    it('ignores scoped messages until an active universe is established', () => {
+      const ws = MockWebSocket.instances[0]
+      getStore().setUniverseScope(null)
+      ws.simulateMessage({ type: 'ingestion_progress', payload: { job_id: 'job-1', universe_id: 'uni-a', status: 'running' } })
+      expect(getStore().ingestionProgress).toEqual({})
+    })
+
+    it('scopes display slices to the active universe without discarding prior submission lifecycle', () => {
+      const ws = MockWebSocket.instances[0]
+      getStore().setUniverseScope('uni-a')
+      getStore().send({
+        type: 'paragraph_submit',
+        payload: {
+          submission_id: 'submission-a',
+          paragraph_ref: 'chapter-a:1',
+          chapter_id: 'chapter-a',
+          universe_id: 'uni-a',
+          text: 'hello',
+        },
+      })
+      ws.simulateMessage({
+        type: 'analysis_progress',
+        payload: { submission_id: 'submission-a', paragraph_ref: 'chapter-a:1', chapter_id: 'chapter-a', universe_id: 'uni-a', stage: 'entities_extracted' },
+      })
+      expect(getStore().pipeline?.stage).toBe('entities_extracted')
+
+      getStore().setUniverseScope('uni-b')
+      expect(getStore().pipeline).toBeNull()
+      expect(getStore().submissions['submission-a']?.phase).toBe('analyzing')
+
+      ws.simulateMessage({
+        type: 'analysis_result',
+        payload: { submission_id: 'submission-a', paragraph_ref: 'chapter-a:1', chapter_id: 'chapter-a', universe_id: 'uni-a' },
+      })
+      ws.simulateMessage({
+        type: 'entity_discovered',
+        payload: { universe_id: 'uni-a', entity: { id: 'entity-a', name: 'Alice', status: 'candidate', universe_id: 'uni-a' } },
+      })
+
+      expect(getStore().submissions['submission-a']?.phase).toBe('analyzing')
+      expect(getStore().analysisResults).toEqual([])
+      expect(getStore().discoveredEntities).toEqual([])
+      expect(getStore().liveCandidates).toEqual([])
     })
 
     it('tracks analysis_failed as a visible terminal state', () => {
       const ws = MockWebSocket.instances[0]
       ws.simulateMessage({
         type: 'analysis_failed',
-        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', reason: 'backend stopped' },
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', universe_id: 'uni-a', reason: 'backend stopped' },
       })
       expect(getStore().submissions['submission-1']).toMatchObject({ phase: 'failed', reason: 'backend stopped' })
     })
@@ -240,11 +323,11 @@ describe('wsStore', () => {
       const ws = MockWebSocket.instances[0]
       getStore().send({
         type: 'paragraph_submit',
-        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', text: 'hello' },
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', universe_id: 'uni-a', text: 'hello' },
       })
       ws.simulateMessage({
         type: 'analysis_progress',
-        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', stage: 'entities_extracted' },
+        payload: { submission_id: 'submission-1', paragraph_ref: 'chapter:1', chapter_id: 'chapter', universe_id: 'uni-a', stage: 'entities_extracted' },
       })
       ws.simulateClose()
       expect(getStore().submissions['submission-1']).toMatchObject({ phase: 'failed' })
@@ -252,28 +335,28 @@ describe('wsStore', () => {
 
     it('dispatches contradiction_alert to contradictions slice', () => {
       const ws = MockWebSocket.instances[0]
-      ws.simulateMessage({ type: 'contradiction_alert', payload: { contradiction: { message: 'conflict', severity: 'high' } } })
+      ws.simulateMessage({ type: 'contradiction_alert', payload: { universe_id: 'uni-a', contradiction: { message: 'conflict', severity: 'high' } } })
       expect(getStore().contradictions).toHaveLength(1)
       expect(getStore().contradictions[0].message).toBe('conflict')
     })
 
     it('dispatches entity_discovered to discoveredEntities slice', () => {
       const ws = MockWebSocket.instances[0]
-      ws.simulateMessage({ type: 'entity_discovered', payload: { name: 'Alice', type: 'character' } })
+      ws.simulateMessage({ type: 'entity_discovered', payload: { universe_id: 'uni-a', name: 'Alice', type: 'character' } })
       expect(getStore().discoveredEntities).toHaveLength(1)
       expect(getStore().discoveredEntities[0].name).toBe('Alice')
     })
 
     it('dispatches contextual_recall to recallItems slice', () => {
       const ws = MockWebSocket.instances[0]
-      ws.simulateMessage({ type: 'contextual_recall', payload: { fact: 'something', score: 0.9 } })
+      ws.simulateMessage({ type: 'contextual_recall', payload: { universe_id: 'uni-a', fact: 'something', score: 0.9 } })
       expect(getStore().recallItems).toHaveLength(1)
       expect(getStore().recallItems[0].fact).toBe('something')
     })
 
     it('dispatches graph_updated to graphPings slice', () => {
       const ws = MockWebSocket.instances[0]
-      ws.simulateMessage({ type: 'graph_updated', payload: { updated: true } })
+      ws.simulateMessage({ type: 'graph_updated', payload: { universe_id: 'uni-a', updated: true } })
       expect(getStore().graphPings).toHaveLength(1)
     })
 
@@ -281,7 +364,7 @@ describe('wsStore', () => {
       const ws = MockWebSocket.instances[0]
       ws.simulateMessage({
         type: 'analysis_progress',
-        payload: { stage: 'checking_contradictions', chapter_id: 'ch-1' },
+        payload: { universe_id: 'uni-a', stage: 'checking_contradictions', chapter_id: 'ch-1' },
       })
       expect(getStore().pipeline).toEqual({
         stage: 'checking_contradictions',
@@ -304,7 +387,7 @@ describe('wsStore', () => {
       }
       ws.simulateMessage({
         type: 'analysis_progress',
-        payload: { stage: 'context_budget', chapter_id: 'ch-1', entity_count: 3, budget },
+        payload: { universe_id: 'uni-a', stage: 'context_budget', chapter_id: 'ch-1', entity_count: 3, budget },
       })
       expect(getStore().pipeline?.stage).toBe('context_budget')
       expect(getStore().pipeline?.entity_count).toBe(3)
@@ -315,10 +398,11 @@ describe('wsStore', () => {
       const ws = MockWebSocket.instances[0]
       ws.simulateMessage({
         type: 'ingestion_progress',
-        payload: { job_id: 'job-1', status: 'running', chapters_processed: 2, total_chapters: 5, action: 'Extracting entities', eta_seconds: 12 },
+        payload: { job_id: 'job-1', universe_id: 'uni-a', status: 'running', chapters_processed: 2, total_chapters: 5, action: 'Extracting entities', eta_seconds: 12 },
       })
       expect(getStore().ingestionProgress['job-1']).toEqual({
         job_id: 'job-1',
+        universe_id: 'uni-a',
         status: 'running',
         chapters_processed: 2,
         total_chapters: 5,
@@ -331,11 +415,11 @@ describe('wsStore', () => {
       const ws = MockWebSocket.instances[0]
       ws.simulateMessage({
         type: 'ingestion_progress',
-        payload: { job_id: 'job-1', status: 'running', chapters_processed: 1, total_chapters: 5 },
+        payload: { job_id: 'job-1', universe_id: 'uni-a', status: 'running', chapters_processed: 1, total_chapters: 5 },
       })
       ws.simulateMessage({
         type: 'ingestion_progress',
-        payload: { job_id: 'job-1', status: 'running', chapters_processed: 3, total_chapters: 5 },
+        payload: { job_id: 'job-1', universe_id: 'uni-a', status: 'running', chapters_processed: 3, total_chapters: 5 },
       })
       expect(getStore().ingestionProgress['job-1'].chapters_processed).toBe(3)
       expect(Object.keys(getStore().ingestionProgress)).toHaveLength(1)
@@ -469,8 +553,9 @@ describe('wsStore', () => {
     it('clears all message slices', () => {
       getStore().connect('test-token')
       MockWebSocket.instances[0].simulateOpen()
-      MockWebSocket.instances[0].simulateMessage({ type: 'analysis_result', payload: { content: 'x' } })
-      MockWebSocket.instances[0].simulateMessage({ type: 'contextual_recall', payload: { fact: 'y' } })
+      getStore().setUniverseScope('uni-a')
+      MockWebSocket.instances[0].simulateMessage({ type: 'analysis_result', payload: { universe_id: 'uni-a', content: 'x' } })
+      MockWebSocket.instances[0].simulateMessage({ type: 'contextual_recall', payload: { universe_id: 'uni-a', fact: 'y' } })
 
       expect(getStore().analysisResults).toHaveLength(1)
       expect(getStore().recallItems).toHaveLength(1)

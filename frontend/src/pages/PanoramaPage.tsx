@@ -1,8 +1,9 @@
-import { useContext, useEffect, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { UniverseContext } from '../contexts/UniverseContext'
 import { api } from '../lib/api'
 import { ENTITY_TYPE_META } from '../lib/entityTypes'
+import PageStatus from '../components/shared/PageStatus'
 import styles from './PanoramaPage.module.css'
 
 interface EntitySummary { id: string; name: string; type: string }
@@ -25,10 +26,26 @@ export default function PanoramaPage() {
   const [topPlotHoles, setTopPlotHoles] = useState<PlotHole[]>([])
   const [latestChapter, setLatestChapter] = useState<LatestChapter | null>(null)
   const [loading, setLoading] = useState(true)
+  const [overviewError, setOverviewError] = useState<string | null>(null)
+  const [overviewRetry, setOverviewRetry] = useState(0)
+  const [overviewUniverse, setOverviewUniverse] = useState<string | null>(null)
+  const overviewUniverseRef = useRef<string | null>(null)
+  const [latestChapterError, setLatestChapterError] = useState<string | null>(null)
+  const [latestChapterRetry, setLatestChapterRetry] = useState(0)
+  const [latestChapterWork, setLatestChapterWork] = useState<string | null>(null)
+  const latestChapterWorkRef = useRef<string | null>(null)
+  const firstWork = works[0]
 
   useEffect(() => {
-    if (!universeId) return
+    if (!universeId) {
+      setLoading(false)
+      setOverviewError('This panorama link is missing a universe.')
+      return
+    }
+    let cancelled = false
+    const hasCurrentOverview = overviewUniverseRef.current === universeId
     setLoading(true)
+    setOverviewError(null)
 
     Promise.all([
       api.listEntities(universeId, { limit: '4' }),
@@ -37,6 +54,7 @@ export default function PanoramaPage() {
       api.getPlotHoles(universeId),
     ])
       .then(([entRes, tlRes, contraRes, phRes]) => {
+        if (cancelled) return
         setEntityCount(entRes.pagination?.total ?? entRes.entities.length)
         setRecentEntities(entRes.entities)
         setEvents(tlRes.events || [])
@@ -46,16 +64,38 @@ export default function PanoramaPage() {
         const holes = phRes.plot_holes || []
         setPlotHoleCount(holes.length)
         setTopPlotHoles((holes as Array<{ id: string; description: string }>).slice(0, 1))
-        setLoading(false)
+        overviewUniverseRef.current = universeId
+        setOverviewUniverse(universeId)
       })
-      .catch(() => setLoading(false))
-  }, [universeId])
+      .catch(() => {
+        if (cancelled) return
+        setOverviewError(
+          hasCurrentOverview
+            ? 'Could not refresh the panorama. Showing last-known data.'
+            : 'Could not load the panorama. Retry to try again.',
+        )
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [universeId, overviewRetry])
 
   useEffect(() => {
-    const firstWork = works[0]
-    if (!firstWork) { setLatestChapter(null); return }
+    if (!firstWork) {
+      latestChapterWorkRef.current = null
+      setLatestChapterWork(null)
+      setLatestChapter(null)
+      setLatestChapterError(null)
+      return
+    }
+    let cancelled = false
+    const hasCurrentChapter = latestChapterWorkRef.current === firstWork.id
+    if (!hasCurrentChapter) setLatestChapter(null)
+    setLatestChapterError(null)
     api.listChapters(firstWork.id)
       .then((res) => {
+        if (cancelled) return
         const chapters = res.chapters || []
         const sorted = [...chapters].sort((a, b) =>
           new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
@@ -66,14 +106,36 @@ export default function PanoramaPage() {
             ? { id: last.id, title: last.title, word_count: last.word_count, work_title: firstWork.title, updated_at: last.updated_at }
             : null
         )
+        latestChapterWorkRef.current = firstWork.id
+        setLatestChapterWork(firstWork.id)
       })
-      .catch(() => setLatestChapter(null))
-  }, [works])
+      .catch(() => {
+        if (cancelled) return
+        setLatestChapterError(
+          hasCurrentChapter
+            ? 'Could not refresh the latest chapter. Showing the last-known result.'
+            : 'Could not load the latest chapter. Retry to continue writing.',
+        )
+      })
+    return () => { cancelled = true }
+  }, [works, latestChapterRetry])
 
   const totalFindings = topContradictions.length + topPlotHoles.length
+  const hasCurrentOverview = overviewUniverse === universeId
+  const hasCurrentLatestChapter = latestChapterWork === firstWork?.id
+
+  if (overviewError && !hasCurrentOverview) {
+    return <PageStatus error={overviewError} onRetry={universeId ? () => setOverviewRetry((attempt) => attempt + 1) : undefined} />
+  }
 
   return (
     <div className={styles.wrap}>
+      {overviewError && hasCurrentOverview && (
+        <div className={styles.degradedNotice} role="status">
+          <span>{overviewError}</span>
+          <button className={styles.degradedRetry} type="button" onClick={() => setOverviewRetry((attempt) => attempt + 1)}>Retry</button>
+        </div>
+      )}
       {/* Stat row */}
       <div className={styles.statGrid}>
         <div className={styles.statCard}>
@@ -95,7 +157,20 @@ export default function PanoramaPage() {
       </div>
 
       {/* Continue / empty banner */}
-      {latestChapter ? (
+      {latestChapterError && hasCurrentLatestChapter && (
+        <div className={styles.degradedNotice} role="status">
+          <span>{latestChapterError}</span>
+          <button className={styles.degradedRetry} type="button" onClick={() => setLatestChapterRetry((attempt) => attempt + 1)}>Retry</button>
+        </div>
+      )}
+      {latestChapterError && !hasCurrentLatestChapter ? (
+        <div className={styles.ingestCard} role="alert">
+          <p className={styles.ingestText}>
+            {latestChapterError}{' '}
+            <button className={styles.degradedRetry} type="button" onClick={() => setLatestChapterRetry((attempt) => attempt + 1)}>Retry</button>
+          </p>
+        </div>
+      ) : latestChapter ? (
         <div className={styles.continueBanner}>
           <div>
             <div className={styles.continueKicker}>Continue where you left off</div>
@@ -114,7 +189,9 @@ export default function PanoramaPage() {
       ) : (
         <div className={styles.ingestCard}>
           <p className={styles.ingestText}>
-            No active work. <strong>Import a manuscript</strong> to get started or create a new work.
+            {firstWork
+              ? 'No chapters yet. Create or import a chapter to begin writing.'
+              : <><span>No active work. </span><strong>Import a manuscript</strong> to get started or create a new work.</>}
           </p>
         </div>
       )}

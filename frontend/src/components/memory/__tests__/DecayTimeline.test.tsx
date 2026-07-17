@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import DecayTimeline from '../DecayTimeline'
 import { api } from '../../../lib/api'
 
@@ -55,7 +56,7 @@ describe('DecayTimeline', () => {
 
     render(<DecayTimeline universeId="u1" />)
 
-    await waitFor(() => expect(screen.getByText(/no memory data yet/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/no entity lifecycle data yet/i)).toBeInTheDocument())
     expect(screen.queryByTestId('decay-timeline-svg')).not.toBeInTheDocument()
   })
 
@@ -120,7 +121,7 @@ describe('DecayTimeline', () => {
     expect(screen.getByTestId('decay-marker-e5-archive-1')).toBeInTheDocument()
   })
 
-  it('runs decay and refetches memory-status when the advance-chapter button is clicked', async () => {
+  it('runs a decay sweep and refetches memory-status when requested', async () => {
     getMemoryStatus.mockResolvedValue({
       consolidated_count: 0,
       entities: [
@@ -139,9 +140,60 @@ describe('DecayTimeline', () => {
     render(<DecayTimeline universeId="u1" />)
     await waitFor(() => expect(getMemoryStatus).toHaveBeenCalledTimes(1))
 
-    screen.getByRole('button', { name: /advance chapter/i }).click()
+    screen.getByRole('button', { name: /run a decay sweep/i }).click()
 
     await waitFor(() => expect(runDecay).toHaveBeenCalledWith('u1'))
     await waitFor(() => expect(getMemoryStatus).toHaveBeenCalledTimes(2))
+  })
+
+  it('shows a retryable error when lifecycle data cannot be loaded', async () => {
+    getMemoryStatus
+      .mockRejectedValueOnce(new Error('Memory status unavailable'))
+      .mockResolvedValueOnce({ consolidated_count: 0, entities: [] })
+
+    render(<DecayTimeline universeId="u1" />)
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/memory status unavailable/i))
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(getMemoryStatus).toHaveBeenCalledTimes(2))
+    expect(screen.getByText(/no entity lifecycle data yet/i)).toBeInTheDocument()
+  })
+
+  it('does not let an older universe response overwrite newer lifecycle data', async () => {
+    let resolveFirstRequest: (value: { consolidated_count: number; entities: object[] }) => void
+    const firstRequest = new Promise<{ consolidated_count: number; entities: object[] }>((resolve) => {
+      resolveFirstRequest = resolve
+    })
+    getMemoryStatus
+      .mockReturnValueOnce(firstRequest)
+      .mockResolvedValueOnce({
+        consolidated_count: 1,
+        entities: [{
+          id: 'new-entity', name: 'New universe entity', type: 'character', relevance_score: 0.8, status: 'active',
+          consolidated: true, lifecycle: 'active', history: [{ score: 0.8, recorded_at: '2026-07-02T00:00:00Z' }],
+        }],
+      })
+
+    const view = render(<DecayTimeline universeId="u1" />)
+    await waitFor(() => expect(getMemoryStatus).toHaveBeenCalledWith('u1'))
+
+    view.rerender(<DecayTimeline universeId="u2" />)
+    await waitFor(() => expect(getMemoryStatus).toHaveBeenCalledWith('u2'))
+    await waitFor(() => expect(screen.getByText(/new universe entity: active/i)).toBeInTheDocument())
+
+    resolveFirstRequest!({
+      consolidated_count: 0,
+      entities: [{
+        id: 'old-entity', name: 'Old universe entity', type: 'character', relevance_score: 0.2, status: 'archived',
+        consolidated: false, lifecycle: 'archived', history: [{ score: 0.2, recorded_at: '2026-07-01T00:00:00Z' }],
+      }],
+    })
+
+    await Promise.resolve()
+    expect(screen.getByText(/new universe entity: active/i)).toBeInTheDocument()
+    expect(screen.queryByText(/old universe entity/i)).not.toBeInTheDocument()
   })
 })

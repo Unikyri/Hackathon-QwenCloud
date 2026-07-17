@@ -1,0 +1,137 @@
+.root {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.legend {
+  padding: 0;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.searchLabel {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.searchField {
+  position: relative;
+}
+
+.searchIcon {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.searchInput {
+  padding-left: 38px;
+}
+
+.selectionSummary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.selectedList,
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.selectedTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 9px;
+  color: var(--teal-deep);
+  background: var(--teal-soft);
+  border: 1px solid color-mix(in srgb, var(--teal) 35%, transparent);
+  border-radius: var(--r-pill);
+  font-size: 13px;
+}
+
+.removeButton {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border-radius: var(--r-round);
+}
+
+.removeButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--teal) 14%, transparent);
+}
+
+.removeIcon {
+  width: 14px;
+  height: 14px;
+}
+
+.option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 7px 11px;
+  color: var(--ink-body);
+  background: var(--bg-card);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.option[data-selected='true'] {
+  color: var(--teal-deep);
+  background: var(--teal-soft);
+  border-color: var(--teal);
+}
+
+.option:hover:not([data-disabled='true']) {
+  border-color: var(--teal);
+}
+
+.option[data-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.checkbox {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--teal);
+}
+
+.empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
