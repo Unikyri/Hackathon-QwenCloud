@@ -1,17 +1,43 @@
 import { useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, FileQuestion, Network, RotateCcw, Search } from 'lucide-react'
+import { ArrowLeft, FileQuestion, Network, RotateCcw } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import GraphCanvas from '../components/knowledge-graph/GraphCanvas'
 import GraphControls from '../components/knowledge-graph/GraphControls'
 import TimelineSlider from '../components/knowledge-graph/TimelineSlider'
+import EntityOverviewTab from '../components/knowledge-graph/EntityOverviewTab'
 import PageStatus from '../components/shared/PageStatus'
 import { UniverseContext } from '../contexts/UniverseContext'
 import { relationText } from '../lib/graphElements'
 import { writeImportPath } from '../lib/canonicalRoutes'
 import { api } from '../lib/api'
+import { ENTITY_TYPES, ENTITY_TYPE_META, type EntityType } from '../lib/entityTypes'
 import { useGraphStore } from '../stores/graphStore'
 import { useWSStore } from '../stores/wsStore'
 import styles from './KnowledgeGraphPage.module.css'
+
+interface FilterEntitySummary {
+  id: string; name: string; type: string; aliases?: string[]
+}
+
+const ENTITY_PAGE_SIZE = 100
+const TYPE_FILTERS = ['All', ...ENTITY_TYPES] as const
+
+function emptyTypeCounts(): Record<EntityType, number> {
+  return Object.fromEntries(ENTITY_TYPES.map((type) => [type, 0])) as Record<EntityType, number>
+}
+
+function getInitial(name: string) {
+  return (name || '?').charAt(0).toUpperCase()
+}
+
+type DetailTab = 'overview' | 'relationships' | 'mentions' | 'relevance'
+
+const DETAIL_TABS: Array<{ id: DetailTab; label: string; placeholder?: string }> = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'relationships', label: 'Relationships', placeholder: 'Relationships view is coming soon.' },
+  { id: 'mentions', label: 'Mentions', placeholder: 'Mentions view is coming soon.' },
+  { id: 'relevance', label: 'Relevance history', placeholder: 'Relevance history is coming soon.' },
+]
 
 export default function KnowledgeGraphPage() {
   const { universeId } = useParams<{ universeId: string }>()
@@ -37,12 +63,26 @@ export default function KnowledgeGraphPage() {
   const selectEdge = useGraphStore((state) => state.selectEdge)
   const graphPings = useWSStore((state) => state.graphPings)
   const previousPingCount = useRef(graphPings.length)
-  const searchRequestVersion = useRef(0)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<Array<{ id: string; name: string; type: string }>>([])
-  const [searchError, setSearchError] = useState<string | null>(null)
-  const [searching, setSearching] = useState(false)
-  const [searchRetry, setSearchRetry] = useState(0)
+
+  // ── Left pane: entity search/filter/list, carried over from EntitiesPage's
+  // list rail. Selection re-centers the map in-page (no URL navigation).
+  const [filterEntities, setFilterEntities] = useState<FilterEntitySummary[]>([])
+  const [filterLoading, setFilterLoading] = useState(true)
+  const [filterLoadingMore, setFilterLoadingMore] = useState(false)
+  const [filterListError, setFilterListError] = useState<string | null>(null)
+  const [filterLoadMoreError, setFilterLoadMoreError] = useState<string | null>(null)
+  const [filterListRetry, setFilterListRetry] = useState(0)
+  const [filterTotal, setFilterTotal] = useState(0)
+  const [filterCountsByType, setFilterCountsByType] = useState<Record<EntityType, number>>(emptyTypeCounts)
+  const [filterSearch, setFilterSearch] = useState('')
+  const [filterType, setFilterType] = useState<(typeof TYPE_FILTERS)[number]>('All')
+  const filterQueryKey = `${universeId ?? ''}\u0000${filterType}\u0000${filterSearch.trim()}`
+  const activeFilterQueryKey = useRef(filterQueryKey)
+  activeFilterQueryKey.current = filterQueryKey
+
+  // ── Right pane: tabbed detail panel for the focused/selected entity.
+  const [activeTab, setActiveTab] = useState<DetailTab>('overview')
+  const detailEntityId = selectedNodeId ?? focalNodeId ?? null
 
   useEffect(() => {
     if (universeId) void fetchGraph(universeId)
@@ -56,42 +96,73 @@ export default function KnowledgeGraphPage() {
   }, [graphPings, refresh])
 
   useEffect(() => {
-    const requestVersion = ++searchRequestVersion.current
-    const query = searchQuery.trim()
-    if (!universeId || !query) {
-      setSearchResults([])
-      setSearchError(null)
-      setSearching(false)
-      return
+    setActiveTab('overview')
+  }, [detailEntityId])
+
+  useEffect(() => {
+    if (!universeId) return
+    let cancelled = false
+    setFilterEntities([])
+    setFilterTotal(0)
+    setFilterCountsByType(emptyTypeCounts())
+    setFilterLoading(true)
+    setFilterLoadingMore(false)
+    setFilterListError(null)
+    setFilterLoadMoreError(null)
+
+    const params: Record<string, string> = { limit: String(ENTITY_PAGE_SIZE), page: '1' }
+    if (filterType !== 'All') params.type = filterType
+    if (filterSearch.trim()) params.search = filterSearch.trim()
+
+    void api.listEntities(universeId, params)
+      .then((res) => {
+        if (cancelled) return
+        const nextEntities = res.entities || []
+        setFilterEntities(nextEntities)
+        setFilterTotal(res.pagination?.total ?? nextEntities.length)
+        setFilterCountsByType({ ...emptyTypeCounts(), ...(res.counts_by_type || {}) })
+      })
+      .catch(() => {
+        if (!cancelled) setFilterListError('Could not load entities for this universe. Retry to try again.')
+      })
+      .finally(() => {
+        if (!cancelled) setFilterLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [universeId, filterType, filterSearch, filterListRetry])
+
+  const loadMoreFiltered = async () => {
+    if (!universeId || filterLoadingMore) return
+    const requestQueryKey = filterQueryKey
+    setFilterLoadingMore(true)
+    setFilterLoadMoreError(null)
+
+    const params: Record<string, string> = {
+      limit: String(ENTITY_PAGE_SIZE),
+      page: String(Math.floor(filterEntities.length / ENTITY_PAGE_SIZE) + 1),
     }
+    if (filterType !== 'All') params.type = filterType
+    if (filterSearch.trim()) params.search = filterSearch.trim()
 
-    setSearchResults([])
-    setSearchError(null)
-    setSearching(true)
+    try {
+      const res = await api.listEntities(universeId, params)
+      if (activeFilterQueryKey.current !== requestQueryKey) return
+      setFilterEntities((current) => [...current, ...(res.entities || [])])
+      setFilterTotal(res.pagination?.total ?? filterTotal)
+    } catch {
+      if (activeFilterQueryKey.current === requestQueryKey) {
+        setFilterLoadMoreError('Could not load more entities. Showing the results already loaded.')
+      }
+    } finally {
+      if (activeFilterQueryKey.current === requestQueryKey) setFilterLoadingMore(false)
+    }
+  }
 
-    const timer = window.setTimeout(() => {
-      api.listEntities(universeId, { search: query, limit: '8' })
-        .then((response) => {
-          if (searchRequestVersion.current === requestVersion) {
-            if (!Array.isArray(response.entities)) {
-              throw new Error('Search returned an invalid response.')
-            }
-            setSearchResults(response.entities)
-            setSearching(false)
-          }
-        })
-        .catch((searchFailure: unknown) => {
-          if (searchRequestVersion.current === requestVersion) {
-            const message = searchFailure instanceof Error ? searchFailure.message : 'Search is unavailable.'
-            setSearchResults([])
-            setSearchError(message)
-            setSearching(false)
-          }
-        })
-    }, 180)
-
-    return () => window.clearTimeout(timer)
-  }, [searchQuery, searchRetry, universeId])
+  const allFilterEntityCount = useMemo(
+    () => Object.values(filterCountsByType).reduce((sum, count) => sum + count, 0),
+    [filterCountsByType],
+  )
 
   const visibleNodes = useMemo(() => nodes.filter((node) => (
     nodeFilter[node.type] !== false && (showArchived || node.data.status !== 'archived')
@@ -100,8 +171,6 @@ export default function KnowledgeGraphPage() {
   const visibleEdges = useMemo(() => edges.filter((edge) => (
     visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)
   )), [edges, visibleNodeIds])
-  const selectedNode = selectedNodeId ? nodes.find((node) => node.id === selectedNodeId) : undefined
-  const selectedEdge = selectedEdgeId ? edges.find((edge) => edge.id === selectedEdgeId) : undefined
 
   if ((loading || error) && nodes.length === 0) {
     return (
@@ -115,6 +184,85 @@ export default function KnowledgeGraphPage() {
 
   return (
     <div className={styles.wrap}>
+      <nav className={`${styles.filterRail} q-scroll`} aria-label="Browse entities">
+        <div className={styles.filterSearchBar}>
+          <input
+            className={styles.filterSearchInput}
+            placeholder="Search entity or alias…"
+            value={filterSearch}
+            onChange={(event) => setFilterSearch(event.target.value)}
+          />
+        </div>
+
+        <div className={styles.filterChips}>
+          {TYPE_FILTERS.map((typeOption) => (
+            <button
+              key={typeOption}
+              type="button"
+              className={`${styles.filterChip} ${filterType === typeOption ? styles.filterChipActive : ''}`}
+              onClick={() => setFilterType(typeOption)}
+            >
+              {typeOption === 'All'
+                ? `All (${allFilterEntityCount})`
+                : `${ENTITY_TYPE_META[typeOption].label}s (${filterCountsByType[typeOption]})`}
+            </button>
+          ))}
+        </div>
+
+        <div className={styles.filterEntityListWrap}>
+          {filterListError ? (
+            <PageStatus error={filterListError} onRetry={() => setFilterListRetry((attempt) => attempt + 1)} />
+          ) : filterLoading ? (
+            <p className={styles.filterEntityListStatus}>Loading…</p>
+          ) : filterEntities.length === 0 ? (
+            <p className={styles.filterEntityListStatus}>No entities found.</p>
+          ) : (
+            <>
+              <ul className={styles.filterEntityList}>
+                {filterEntities.map((entity) => {
+                  const meta = ENTITY_TYPE_META[entity.type as keyof typeof ENTITY_TYPE_META] || ENTITY_TYPE_META.character
+                  return (
+                    <li key={entity.id}>
+                      <button
+                        type="button"
+                        className={`${styles.filterEntityItem} ${selectedNodeId === entity.id ? styles.filterEntityItemActive : ''}`}
+                        onClick={() => void focusNode(entity.id)}
+                      >
+                        <span className={styles.filterEntityAvatar} style={{ background: meta.color }}>
+                          {getInitial(entity.name)}
+                        </span>
+                        <span className={styles.filterEntityInfo}>
+                          <span className={styles.filterEntityName}>{entity.name}</span>
+                          <span className={styles.filterEntityType} style={{ color: meta.color }}>
+                            {meta.label.toUpperCase()}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+              {filterEntities.length < filterTotal && (
+                <button
+                  className={styles.filterLoadMore}
+                  type="button"
+                  onClick={() => void loadMoreFiltered()}
+                  disabled={filterLoadingMore}
+                >
+                  {filterLoadingMore ? 'Loading…' : `Load more (${filterEntities.length} of ${filterTotal})`}
+                </button>
+              )}
+              {filterLoadMoreError && (
+                <p className={styles.filterLoadMoreError} role="status">
+                  {filterLoadMoreError}{' '}
+                  <button type="button" onClick={() => void loadMoreFiltered()}>Retry</button>
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      </nav>
+
       <section className={styles.canvasArea} aria-labelledby="relationship-map-heading">
         <header className={styles.mapHeader}>
           <div>
@@ -174,46 +322,6 @@ export default function KnowledgeGraphPage() {
       </section>
 
       <aside className={`${styles.inspector} q-scroll`} aria-label="Relationship map details">
-        <div className={styles.searchSection}>
-          <label className={styles.kicker} htmlFor="entity-search">Jump to entity</label>
-          <div className={styles.searchField}>
-            <Search size={15} aria-hidden="true" />
-            <input
-              id="entity-search"
-              placeholder="Search a name or alias"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-            />
-          </div>
-          {searchError ? (
-            <div className={styles.searchFailure} role="alert">
-              <span>Search unavailable. {searchError}</span>
-              <button type="button" onClick={() => setSearchRetry((attempt) => attempt + 1)}>Retry search</button>
-            </div>
-          ) : searchResults.length > 0 ? (
-            <ul className={styles.searchResults} aria-label="Matching entities">
-              {searchResults.map((entity) => (
-                <li key={entity.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void focusNode(entity.id)
-                      setSearchQuery('')
-                      setSearchResults([])
-                      setSearchError(null)
-                    }}
-                  >
-                    <span>{entity.name}</span>
-                    <small>{entity.type.replace(/_/g, ' ')}</small>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : searchQuery.trim() && !searching ? (
-            <p className={styles.searchEmpty}>No matching entities.</p>
-          ) : null}
-        </div>
-
         {breadcrumb.length > 0 && (
           <button className={styles.backButton} type="button" onClick={() => void goBack()}>
             <ArrowLeft size={14} aria-hidden="true" />
@@ -221,51 +329,32 @@ export default function KnowledgeGraphPage() {
           </button>
         )}
 
-        {selectedEdge ? (
-          <section className={styles.focusedInspector} aria-labelledby="relationship-inspector-heading">
-            <p className={styles.kicker}>Selected relationship</p>
-            <h2 id="relationship-inspector-heading">{relationText(selectedEdge, nodes)}</h2>
-            <dl className={styles.detailList}>
-              <div>
-                <dt>Relationship type</dt>
-                <dd>{selectedEdge.relationshipType || 'Unavailable'}</dd>
-              </div>
-              <div>
-                <dt>Evidence</dt>
-                <dd>Unavailable — the neighborhood API does not provide relationship evidence.</dd>
-              </div>
-              <div>
-                <dt>Source chapter</dt>
-                <dd>Unavailable — the neighborhood API does not provide a source chapter.</dd>
-              </div>
-              <div>
-                <dt>Related conflicts</dt>
-                <dd>Unavailable — the neighborhood API does not include conflict context.</dd>
-              </div>
-            </dl>
-          </section>
-        ) : selectedNode ? (
-          <section className={styles.focusedInspector} aria-labelledby="entity-inspector-heading">
-            <p className={styles.kicker}>Focused entity</p>
-            <h2 id="entity-inspector-heading">{selectedNode.data.label}</h2>
-            <dl className={styles.detailList}>
-              <div>
-                <dt>Type</dt>
-                <dd>{selectedNode.type.replace(/_/g, ' ')}</dd>
-              </div>
-              <div>
-                <dt>Connections shown</dt>
-                <dd>{edges.filter((edge) => edge.source === selectedNode.id || edge.target === selectedNode.id).length}</dd>
-              </div>
-              <div>
-                <dt>Relevance</dt>
-                <dd>{typeof selectedNode.data.relevanceScore === 'number' ? `${Math.round(selectedNode.data.relevanceScore * 100)}%` : 'Unavailable'}</dd>
-              </div>
-              <div>
-                <dt>Related conflicts</dt>
-                <dd>Unavailable — the neighborhood API does not include conflict context.</dd>
-              </div>
-            </dl>
+        {detailEntityId ? (
+          <section className={styles.detailPanelTabs} aria-labelledby="entity-detail-heading">
+            <p className={styles.kicker} id="entity-detail-heading">Focused entity</p>
+            <div className={styles.tabStrip} role="tablist" aria-label="Entity detail tabs">
+              {DETAIL_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === tab.id}
+                  className={`${styles.tabButton} ${activeTab === tab.id ? styles.tabButtonActive : ''}`}
+                  onClick={() => setActiveTab(tab.id)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <div className={styles.tabPanel} role="tabpanel">
+              {activeTab === 'overview' ? (
+                <EntityOverviewTab entityId={detailEntityId} />
+              ) : (
+                <p className={styles.tabPlaceholder}>
+                  {DETAIL_TABS.find((tab) => tab.id === activeTab)?.placeholder}
+                </p>
+              )}
+            </div>
           </section>
         ) : (
           <section className={styles.focusedInspector}>

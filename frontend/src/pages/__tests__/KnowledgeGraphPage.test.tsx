@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, act, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, act, fireEvent, within } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import KnowledgeGraphPage from '../KnowledgeGraphPage'
 import { UniverseContext } from '../../contexts/UniverseContext'
@@ -29,6 +29,14 @@ vi.mock('cytoscape-fcose', () => ({ default: {} }))
 // CSS module mock
 vi.mock('../KnowledgeGraphPage.module.css', () => ({ default: new Proxy({}, { get: (_, k) => k }) }))
 
+// EntityOverviewTab has its own dedicated test suite — stub it here so this
+// suite only asserts the shell wires the right entityId in, not its internals.
+vi.mock('../../components/knowledge-graph/EntityOverviewTab', () => ({
+  default: ({ entityId }: { entityId: string }) => (
+    <div data-testid="entity-overview-tab">Overview for {entityId}</div>
+  ),
+}))
+
 // Navigate spy for CTA assertion
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
@@ -42,9 +50,9 @@ const { pingBox } = vi.hoisted(() => {
   return { pingBox: box }
 })
 
-// Mock api. listEntities backs both the initial auto-focus lookup and the
-// "Jump to entity" search box; getEntityNeighbors backs fetchGraph/focusNode;
-// getTimeline backs the embedded TimelineSlider.
+// Mock api. listEntities backs both the initial auto-focus lookup (via the
+// store) and the left-pane entity search/filter rail; getEntityNeighbors
+// backs fetchGraph/focusNode; getTimeline backs the embedded TimelineSlider.
 const mockListEntities = vi.fn()
 const mockGetEntityNeighbors = vi.fn()
 const mockGetTimeline = vi.fn()
@@ -72,6 +80,11 @@ const defaultContext = {
 }
 
 const graphLimits = { hops: 2, max_hops: 2, node_limit: 96, edge_limit: 160, result_limit: 256 }
+const emptyCounts = { character: 0, place: 0, object: 0, faction: 0, event: 0, world_rule: 0, plot_arc: 0 }
+
+function aliceNode() {
+  return { id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } }
+}
 
 function renderPage() {
   return render(
@@ -123,11 +136,9 @@ describe('KnowledgeGraphPage', () => {
   })
 
   it('renders graph controls and canvas when nodes exist', async () => {
-    mockListEntities.mockResolvedValue({ entities: [{ id: 'n1' }] })
+    mockListEntities.mockResolvedValue({ entities: [{ id: 'n1', name: 'Alice', type: 'character' }], counts_by_type: { ...emptyCounts, character: 1 }, pagination: { total: 1 } })
     mockGetEntityNeighbors.mockResolvedValue({
-      nodes: [
-        { id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } },
-      ],
+      nodes: [aliceNode()],
       edges: [],
       truncated: false,
       limits: graphLimits,
@@ -141,9 +152,9 @@ describe('KnowledgeGraphPage', () => {
   })
 
   it('warns when the server returns a truncated neighborhood', async () => {
-    mockListEntities.mockResolvedValue({ entities: [{ id: 'n1' }] })
+    mockListEntities.mockResolvedValue({ entities: [{ id: 'n1', name: 'Alice', type: 'character' }], counts_by_type: { ...emptyCounts, character: 1 }, pagination: { total: 1 } })
     mockGetEntityNeighbors.mockResolvedValue({
-      nodes: [{ id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } }],
+      nodes: [aliceNode()],
       edges: [],
       truncated: true,
       limits: graphLimits,
@@ -154,61 +165,6 @@ describe('KnowledgeGraphPage', () => {
       expect(screen.getByText('Large neighborhood: showing a bounded partial map.')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Retry map' })).toBeInTheDocument()
     })
-  })
-
-  it('distinguishes a failed entity search from zero matching entities and offers retry', async () => {
-    mockListEntities
-      .mockResolvedValueOnce({ entities: [{ id: 'n1' }] })
-      .mockRejectedValueOnce(new Error('Search connection lost'))
-    mockGetEntityNeighbors.mockResolvedValue({
-      nodes: [{ id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } }],
-      edges: [],
-      truncated: false,
-      limits: graphLimits,
-    })
-    renderPage()
-
-    await waitFor(() => {
-      expect(screen.getByRole('application', { name: /story relationship map/i })).toBeInTheDocument()
-    })
-
-    vi.useFakeTimers()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Jump to entity' }), { target: { value: 'alice' } })
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(180)
-    })
-    vi.useRealTimers()
-
-    expect(screen.getByRole('alert')).toHaveTextContent('Search unavailable. Search connection lost')
-    expect(screen.getByRole('button', { name: 'Retry search' })).toBeInTheDocument()
-    expect(screen.queryByText('No matching entities.')).not.toBeInTheDocument()
-  })
-
-  it('labels a successful empty entity search as zero matches', async () => {
-    mockListEntities
-      .mockResolvedValueOnce({ entities: [{ id: 'n1' }] })
-      .mockResolvedValueOnce({ entities: [] })
-    mockGetEntityNeighbors.mockResolvedValue({
-      nodes: [{ id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } }],
-      edges: [],
-      truncated: false,
-      limits: graphLimits,
-    })
-    renderPage()
-
-    await waitFor(() => {
-      expect(screen.getByRole('application', { name: /story relationship map/i })).toBeInTheDocument()
-    })
-
-    vi.useFakeTimers()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Jump to entity' }), { target: { value: 'missing' } })
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(180)
-    })
-    vi.useRealTimers()
-
-    expect(screen.getByText('No matching entities.')).toBeInTheDocument()
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('shows error state on API failure', async () => {
@@ -231,9 +187,9 @@ describe('KnowledgeGraphPage', () => {
   })
 
   it('calls refresh when WS graph_updated ping arrives via wsStore', async () => {
-    mockListEntities.mockResolvedValue({ entities: [{ id: 'n1' }] })
+    mockListEntities.mockResolvedValue({ entities: [{ id: 'n1', name: 'Alice', type: 'character' }], counts_by_type: { ...emptyCounts, character: 1 }, pagination: { total: 1 } })
     mockGetEntityNeighbors.mockResolvedValue({
-      nodes: [{ id: 'n1', properties: { raw: '{"id":1,"label":"character","properties":{"entity_id":"n1","name":"Alice"}}' } }],
+      nodes: [aliceNode()],
       edges: [],
       truncated: false,
       limits: graphLimits,
@@ -275,5 +231,136 @@ describe('KnowledgeGraphPage', () => {
 
     fireEvent.click(ctaButton)
     expect(mockNavigate).toHaveBeenCalledWith('/universe/uni-1/write?panel=import')
+  })
+
+  // ── Left pane: entity search/filter carried over from EntitiesPage ────────
+  describe('left pane entity filters', () => {
+    function twoEntityResponse() {
+      return {
+        entities: [
+          { id: 'n1', name: 'Alice', type: 'character' },
+          { id: 'n2', name: 'Bob', type: 'character' },
+        ],
+        counts_by_type: { ...emptyCounts, character: 2 },
+        pagination: { total: 2 },
+      }
+    }
+
+    it('renders the entity list with search input and type-filter chips', async () => {
+      mockListEntities.mockResolvedValue(twoEntityResponse())
+      mockGetEntityNeighbors.mockResolvedValue({ nodes: [aliceNode()], edges: [], truncated: false, limits: graphLimits })
+      renderPage()
+
+      const nav = await screen.findByRole('navigation', { name: 'Browse entities' })
+      expect(within(nav).getByPlaceholderText('Search entity or alias…')).toBeInTheDocument()
+      expect(within(nav).getByRole('button', { name: 'Characters (2)' })).toBeInTheDocument()
+      expect(within(nav).getByText('Alice')).toBeInTheDocument()
+      expect(within(nav).getByText('Bob')).toBeInTheDocument()
+    })
+
+    it('requests the selected type filter from the server', async () => {
+      mockListEntities.mockResolvedValue(twoEntityResponse())
+      mockGetEntityNeighbors.mockResolvedValue({ nodes: [aliceNode()], edges: [], truncated: false, limits: graphLimits })
+      renderPage()
+
+      const nav = await screen.findByRole('navigation', { name: 'Browse entities' })
+      mockListEntities.mockClear()
+      fireEvent.click(within(nav).getByRole('button', { name: 'Characters (2)' }))
+
+      await waitFor(() => {
+        expect(mockListEntities).toHaveBeenCalledWith('uni-1', { limit: '100', page: '1', type: 'character' })
+      })
+    })
+
+    it('requests search terms from the server as the user types', async () => {
+      mockListEntities.mockResolvedValue(twoEntityResponse())
+      mockGetEntityNeighbors.mockResolvedValue({ nodes: [aliceNode()], edges: [], truncated: false, limits: graphLimits })
+      renderPage()
+
+      const nav = await screen.findByRole('navigation', { name: 'Browse entities' })
+      mockListEntities.mockClear()
+      fireEvent.change(within(nav).getByPlaceholderText('Search entity or alias…'), { target: { value: 'Ali' } })
+
+      await waitFor(() => {
+        expect(mockListEntities).toHaveBeenCalledWith('uni-1', { limit: '100', page: '1', search: 'Ali' })
+      })
+    })
+
+    it('selecting an entity re-centers the map on it', async () => {
+      mockListEntities.mockResolvedValue(twoEntityResponse())
+      mockGetEntityNeighbors.mockResolvedValue({ nodes: [aliceNode()], edges: [], truncated: false, limits: graphLimits })
+      renderPage()
+
+      const nav = await screen.findByRole('navigation', { name: 'Browse entities' })
+      await waitFor(() => expect(mockGetEntityNeighbors).toHaveBeenCalledTimes(1))
+
+      fireEvent.click(within(nav).getByText('Bob'))
+
+      await waitFor(() => {
+        expect(mockGetEntityNeighbors).toHaveBeenCalledWith('n2', 'uni-1', 2)
+      })
+    })
+  })
+
+  // ── Right pane: tabbed detail panel ────────────────────────────────────────
+  describe('tabbed detail panel', () => {
+    it('defaults to the Overview tab for the focal entity', async () => {
+      mockListEntities.mockResolvedValue({ entities: [{ id: 'n1', name: 'Alice', type: 'character' }], counts_by_type: { ...emptyCounts, character: 1 }, pagination: { total: 1 } })
+      mockGetEntityNeighbors.mockResolvedValue({ nodes: [aliceNode()], edges: [], truncated: false, limits: graphLimits })
+      renderPage()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('entity-overview-tab')).toHaveTextContent('Overview for n1')
+      })
+      expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
+    })
+
+    it('switches to a placeholder when a not-yet-implemented tab is clicked, and back', async () => {
+      mockListEntities.mockResolvedValue({ entities: [{ id: 'n1', name: 'Alice', type: 'character' }], counts_by_type: { ...emptyCounts, character: 1 }, pagination: { total: 1 } })
+      mockGetEntityNeighbors.mockResolvedValue({ nodes: [aliceNode()], edges: [], truncated: false, limits: graphLimits })
+      renderPage()
+
+      await waitFor(() => screen.getByTestId('entity-overview-tab'))
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Relationships' }))
+      expect(screen.queryByTestId('entity-overview-tab')).not.toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Relationships' })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByText('Relationships view is coming soon.')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Mentions' }))
+      expect(screen.getByText('Mentions view is coming soon.')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Relevance history' }))
+      expect(screen.getByText('Relevance history is coming soon.')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Overview' }))
+      expect(screen.getByTestId('entity-overview-tab')).toBeInTheDocument()
+    })
+
+    it('resets to the Overview tab when a new entity is focused', async () => {
+      mockListEntities.mockResolvedValue({
+        entities: [
+          { id: 'n1', name: 'Alice', type: 'character' },
+          { id: 'n2', name: 'Bob', type: 'character' },
+        ],
+        counts_by_type: { ...emptyCounts, character: 2 },
+        pagination: { total: 2 },
+      })
+      mockGetEntityNeighbors.mockResolvedValue({ nodes: [aliceNode()], edges: [], truncated: false, limits: graphLimits })
+      renderPage()
+
+      const nav = await screen.findByRole('navigation', { name: 'Browse entities' })
+      await waitFor(() => screen.getByTestId('entity-overview-tab'))
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Relationships' }))
+      expect(screen.getByText('Relationships view is coming soon.')).toBeInTheDocument()
+
+      fireEvent.click(within(nav).getByText('Bob'))
+
+      await waitFor(() => {
+        expect(screen.getByTestId('entity-overview-tab')).toHaveTextContent('Overview for n2')
+      })
+      expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
+    })
   })
 })
