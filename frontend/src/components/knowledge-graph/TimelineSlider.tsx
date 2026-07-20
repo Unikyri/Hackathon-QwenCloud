@@ -16,6 +16,13 @@ export default function TimelineSlider({ universeId }: TimelineSliderProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [index, setIndex] = useState(0)
+  // Landing on the map should show the whole graph at full opacity — the
+  // dim/highlight effect below is a response to the writer picking a
+  // specific event, not a default state. Without this flag, event 0's
+  // participants got highlighted (and every other node dimmed to 0.2
+  // opacity) the instant the page loaded, before anyone touched the
+  // timeline — the map read as "mostly grayed out" for no visible reason.
+  const [hasInteracted, setHasInteracted] = useState(false)
   const nodes = useGraphStore((state) => state.nodes)
   const focusNode = useGraphStore((state) => state.focusNode)
   const setEventHighlight = useGraphStore((state) => state.setEventHighlight)
@@ -30,6 +37,7 @@ export default function TimelineSlider({ universeId }: TimelineSliderProps) {
         const sorted = [...(raw || [])].sort((a, b) => (a.timeline_position ?? 0) - (b.timeline_position ?? 0))
         setEvents(sorted)
         setIndex(0)
+        setHasInteracted(false)
         setLoading(false)
       })
       .catch((requestError: Error) => {
@@ -45,12 +53,14 @@ export default function TimelineSlider({ universeId }: TimelineSliderProps) {
 
   // Selecting a position on the timeline highlights that event's key
   // entities on the map immediately — no extra click needed to "filter" by
-  // event. Clearing on unmount keeps a stale highlight from surviving a
-  // navigation away from the map.
+  // event. Gated on hasInteracted so the map starts fully visible; only a
+  // real step/tick/participant click turns highlighting on. Clearing on
+  // unmount keeps a stale highlight from surviving a navigation away.
   useEffect(() => {
+    if (!hasInteracted) return
     setEventHighlight(selected?.participants && selected.participants.length > 0 ? selected.participants : null)
     return () => setEventHighlight(null)
-  }, [selected, setEventHighlight])
+  }, [selected, hasInteracted, setEventHighlight])
 
   if (loading) return <div className={styles.wrap}><div className={`skeleton ${styles.skeleton}`} /></div>
   if (error) return <p className={styles.error} role="alert">Timeline unavailable: {error}</p>
@@ -67,7 +77,7 @@ export default function TimelineSlider({ universeId }: TimelineSliderProps) {
         <button
           type="button"
           className={styles.step}
-          onClick={() => setIndex((i) => Math.max(0, i - 1))}
+          onClick={() => { setHasInteracted(true); setIndex((i) => Math.max(0, i - 1)) }}
           disabled={index === 0}
           aria-label="Previous event"
         >‹</button>
@@ -79,7 +89,7 @@ export default function TimelineSlider({ universeId }: TimelineSliderProps) {
               key={event.id}
               type="button"
               className={`${styles.tick} ${i === index ? styles.tickActive : ''}`}
-              onClick={() => setIndex(i)}
+              onClick={() => { setHasInteracted(true); setIndex(i) }}
               aria-current={i === index}
               title={eventLabel(event)}
             >
@@ -90,7 +100,7 @@ export default function TimelineSlider({ universeId }: TimelineSliderProps) {
         <button
           type="button"
           className={styles.step}
-          onClick={() => setIndex((i) => Math.min(events.length - 1, i + 1))}
+          onClick={() => { setHasInteracted(true); setIndex((i) => Math.min(events.length - 1, i + 1)) }}
           disabled={index === events.length - 1}
           aria-label="Next event"
         >›</button>
@@ -98,7 +108,12 @@ export default function TimelineSlider({ universeId }: TimelineSliderProps) {
 
       {selected && (
         <div className={styles.eventCard}>
-          <p className={styles.eventLabel}>{eventLabel(selected)}</p>
+          <div className={styles.eventHeader}>
+            <p className={styles.eventTitle}>{selected.title}</p>
+            {selected.timeline_label && selected.timeline_label !== selected.title && (
+              <span className={styles.eventTime}>{selected.timeline_label}</span>
+            )}
+          </div>
           {selected.description && <p className={styles.eventDescription}>{selected.description}</p>}
           {selected.participants && selected.participants.length > 0 && (
             <div className={styles.participants} aria-label="Key entities in this event">

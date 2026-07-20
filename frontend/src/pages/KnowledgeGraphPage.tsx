@@ -65,6 +65,7 @@ export default function KnowledgeGraphPage() {
   const truncated = useGraphStore((state) => state.truncated)
   const limits = useGraphStore((state) => state.limits)
   const focusNode = useGraphStore((state) => state.focusNode)
+  const setSingleTypeFilter = useGraphStore((state) => state.setSingleTypeFilter)
   const goBack = useGraphStore((state) => state.goBack)
   const graphPings = useWSStore((state) => state.graphPings)
   const previousPingCount = useRef(graphPings.length)
@@ -205,7 +206,7 @@ export default function KnowledgeGraphPage() {
               key={typeOption}
               type="button"
               className={`${styles.filterChip} ${filterType === typeOption ? styles.filterChipActive : ''}`}
-              onClick={() => setFilterType(typeOption)}
+              onClick={() => { setFilterType(typeOption); setSingleTypeFilter(typeOption) }}
             >
               {typeOption === 'All'
                 ? `All (${allFilterEntityCount})`
@@ -318,14 +319,16 @@ export default function KnowledgeGraphPage() {
             }
           />
         ) : (
-          <>
+          <div className={styles.canvasFrame}>
             <GraphControls />
             <GraphCanvas />
-          </>
+          </div>
         )}
 
         {universeId && (
-          <TimelineSlider universeId={universeId} />
+          <div className={styles.timelineFrame}>
+            <TimelineSlider universeId={universeId} />
+          </div>
         )}
       </section>
 

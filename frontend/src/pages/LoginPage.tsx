@@ -13,7 +13,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const { login, register } = useAuthStore()
   const navigate = useNavigate()
-  const { startDemo, pending: demoPending, error: demoError } = useDemoProvisioning()
+  const { startDemo, startDemoFromScratch, pending: demoPending, pendingScratch, error: demoError } = useDemoProvisioning()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -204,8 +204,12 @@ export default function LoginPage() {
             <span className={styles.dividerLine} />
           </div>
 
-          <button className={styles.demoBtn} onClick={() => void startDemo()} disabled={demoPending}>
-            Try the Demo
+          {/* A: Two-button demo choice mirroring the LandingPage CTAs */}
+          <button className={styles.demoBtn} onClick={() => void startDemoFromScratch()} disabled={pendingScratch || demoPending}>
+            {pendingScratch ? 'Creating universe…' : 'See it build — start from scratch'}
+          </button>
+          <button className={`${styles.demoBtn} ${styles.demoBtnGhost}`} onClick={() => void startDemo()} disabled={demoPending || pendingScratch}>
+            {demoPending ? 'Loading demo…' : 'Skip ahead — jump into a finished universe'}
           </button>
 
 

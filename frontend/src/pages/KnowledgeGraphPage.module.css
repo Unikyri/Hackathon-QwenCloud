@@ -23,10 +23,32 @@
   background: var(--bg-graph);
 }
 
-.canvasArea > :last-child {
+/* Wraps GraphControls + GraphCanvas only — NOT the Timeline, which sits below
+   as its own sibling and should size to its own content instead of being
+   stretched by this rule. (:last-child alone broke once Timeline became the
+   actual last child of .canvasArea: it inherited this growth instead of the
+   canvas, squeezing the canvas fixed-size and clipping the Timeline via the
+   parent's overflow: hidden.) */
+.canvasFrame {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-width: 0;
   min-height: clamp(20rem, 48dvh, 38rem);
+  gap: 12px;
+}
+
+.canvasFrame > :last-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Never asked to shrink below its own content — takes its natural height so
+   it can't be squeezed to a sliver by canvasFrame's min-height floor. */
+.timelineFrame {
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 /* ── Left pane: entity search/filter/list (carried over from EntitiesPage) ── */

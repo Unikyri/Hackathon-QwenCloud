@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Brain, ChevronDown, Compass, Home, Loader2, LogOut, PenLine, User, Wifi, WifiOff } from 'lucide-react'
+import { AlertCircle, Brain, ChevronDown, Compass, Home, Loader2, LogOut, PenLine, Sparkles, User, Wifi, WifiOff } from 'lucide-react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useFeedback } from '../components/feedback'
 import { GenreTagPicker } from '../components/genres'
 import { UniverseContext, type UniverseContextValue } from '../contexts/UniverseContext'
-import { explorePath, memoryPath, profileIntegrationsPath, profileMemoryPath, reviewPath, writePath } from '../lib/canonicalRoutes'
+import { explorePath, memoryPath, profileIntegrationsPath, profileMemoryPath, reviewPath, skillsPath, writePath } from '../lib/canonicalRoutes'
 import { api } from '../lib/api'
 import { useWS } from '../hooks/useWS'
 import { useAuthStore } from '../stores/authStore'
@@ -20,7 +20,7 @@ import {
 } from './guidedDemo'
 import styles from './UniverseLayout.module.css'
 
-type Destination = 'home' | 'write' | 'explore' | 'memory' | 'review'
+type Destination = 'home' | 'write' | 'explore' | 'memory' | 'review' | 'skills'
 
 interface NavigationItem {
   id: Destination
@@ -36,6 +36,8 @@ const navigation: NavigationItem[] = [
   { id: 'explore', label: 'Map', shortcut: 'Alt+3', to: (id) => explorePath(id, 'map'), Icon: Compass },
   { id: 'memory', label: 'Memory', shortcut: 'Alt+4', to: memoryPath, Icon: Brain },
   { id: 'review', label: 'Review', shortcut: 'Alt+5', to: (id) => reviewPath(id, 'issues'), Icon: AlertCircle },
+  // C: Skills activation tab — turn skills on/off for the universe
+  { id: 'skills', label: 'Skills', shortcut: 'Alt+6', to: skillsPath, Icon: Sparkles },
 ]
 
 function activeDestination(pathname: string, universeId?: string): Destination {
@@ -48,6 +50,7 @@ function activeDestination(pathname: string, universeId?: string): Destination {
   if (pathname.startsWith(`${prefix}explore`)) return 'explore'
   if (pathname.startsWith(`${prefix}memory`)) return 'memory'
   if (pathname.startsWith(`${prefix}review`)) return 'review'
+  if (pathname.startsWith(`${prefix}skills`)) return 'skills'
   return 'write'
 }
 

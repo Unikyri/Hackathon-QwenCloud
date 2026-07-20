@@ -37,6 +37,7 @@ interface GraphState {
   selectNode: (id: string | null) => void
   selectEdge: (id: string | null) => void
   toggleFilter: (type: string) => void
+  setSingleTypeFilter: (type: string | 'All') => void
   toggleArchived: () => void
   setEventHighlight: (ids: string[] | null) => void
 }
@@ -212,6 +213,17 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   toggleFilter: (type) => {
     const current = get().nodeFilter
     set({ nodeFilter: { ...current, [type]: !current[type] } })
+  },
+
+  // Drives the canvas from the sidebar's own type chips (the header's
+  // per-type checkbox row was a second, redundant control surface for the
+  // same filter — removed in favor of this single source of truth).
+  setSingleTypeFilter: (type) => {
+    if (type === 'All') {
+      set({ nodeFilter: Object.fromEntries(ALL_TYPES.map((t) => [t, true])) })
+      return
+    }
+    set({ nodeFilter: Object.fromEntries(ALL_TYPES.map((t) => [t, t === type])) })
   },
 
   toggleArchived: () => set((state) => ({ showArchived: !state.showArchived })),

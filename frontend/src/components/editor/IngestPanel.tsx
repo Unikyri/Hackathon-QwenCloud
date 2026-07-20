@@ -8,6 +8,8 @@ import { writePath } from '../../pages/writeRoutes'
 import styles from './IngestPanel.module.css'
 
 const ACCEPTED_EXTENSIONS = ['.md', '.txt', '.pdf', '.docx']
+const SAMPLE_MANUSCRIPT_URL = '/demo/manuscript.md'
+const SAMPLE_MANUSCRIPT_FILENAME = 'the-shattered-compact.md'
 
 interface IngestJob {
   jobId: string
@@ -298,6 +300,30 @@ export function IngestPanel({ universeId, workId, onClose, onCompleted, standalo
     }
   }, [isUploadingCurrentUniverse, loadJobs, publish, universeId, update, workId])
 
+  const [isFetchingSample, setIsFetchingSample] = useState(false)
+
+  // A judge landing on an empty universe has no manuscript of their own to
+  // upload — this fetches the bundled fixture (public/demo/manuscript.md,
+  // shipped with the app, not something the visitor has to source) and
+  // routes it through the same handleFile() path as a real upload, so
+  // progress/job-card/WS wiring all just work unchanged.
+  const handleUseSample = useCallback(async () => {
+    if (isUploadingCurrentUniverse || isFetchingSample) return
+    setIsFetchingSample(true)
+    try {
+      const response = await fetch(SAMPLE_MANUSCRIPT_URL)
+      if (!response.ok) throw new Error('Could not load the sample manuscript.')
+      const text = await response.text()
+      const file = new File([text], SAMPLE_MANUSCRIPT_FILENAME, { type: 'text/markdown' })
+      await handleFile(file)
+    } catch (error) {
+      setUploadError(errorMessage(error, 'Could not load the sample manuscript.'))
+      setUploadErrorUniverseId(universeId)
+    } finally {
+      setIsFetchingSample(false)
+    }
+  }, [handleFile, isFetchingSample, isUploadingCurrentUniverse, universeId])
+
   const handleDrop = (event: DragEvent<HTMLButtonElement>) => {
     event.preventDefault()
     setDragOver(false)
@@ -329,6 +355,18 @@ export function IngestPanel({ universeId, workId, onClose, onCompleted, standalo
         </div>
       )}
       <>
+        <button
+          type="button"
+          className={styles.sampleButton}
+          onClick={() => void handleUseSample()}
+          disabled={isUploadingCurrentUniverse || isFetchingSample}
+        >
+          {isFetchingSample ? 'Loading sample manuscript…' : 'Use sample manuscript'}
+        </button>
+        <p className={styles.sampleHint}>
+          No manuscript on hand? Load a ready-made 3-chapter draft with planted contradictions and watch Quill analyze it live.
+        </p>
+
         <button
             type="button"
             className={styles.dropzone}

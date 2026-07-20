@@ -309,6 +309,19 @@
   cursor: not-allowed;
 }
 
+/* A: Secondary demo option — lighter visual weight so the "see it build" path stands out. */
+.demoBtnGhost {
+  color: var(--muted);
+  border-color: var(--line);
+  font-weight: 500;
+  margin-top: 6px;
+}
+.demoBtnGhost:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--muted-2);
+}
+
+
 .switchText {
   text-align: center;
   font-size: 13px;

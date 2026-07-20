@@ -312,6 +312,43 @@ describe('IngestPanel', () => {
     expect(mockListIngestionJobs).toHaveBeenCalledTimes(2)
   })
 
+  it('loads the bundled sample manuscript and ingests it without a file picker', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve('# The Shattered Compact\n\n## Chapter 1\n\nSample body.'),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    mockIngestDocument.mockResolvedValue({ job_id: 'job-sample', status: 'accepted' })
+    renderPanel()
+
+    const user = userEvent.setup()
+    await user.click(await screen.findByText('Use sample manuscript'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/demo/manuscript.md')
+      expect(mockIngestDocument).toHaveBeenCalledWith(
+        'uni-1',
+        expect.objectContaining({ name: 'the-shattered-compact.md' }),
+      )
+      expect(screen.getByText('the-shattered-compact.md')).toBeInTheDocument()
+    })
+
+    vi.unstubAllGlobals()
+  })
+
+  it('shows an error when the bundled sample manuscript fails to load', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
+    renderPanel()
+
+    const user = userEvent.setup()
+    await user.click(await screen.findByText('Use sample manuscript'))
+
+    expect(await screen.findByText('Could not load the sample manuscript.')).toBeInTheDocument()
+    expect(mockIngestDocument).not.toHaveBeenCalled()
+
+    vi.unstubAllGlobals()
+  })
+
   it('ignores a deferred A job list after the universeId prop changes to B', async () => {
     let resolveA!: (value: { jobs: unknown[] }) => void
     let resolveB!: (value: { jobs: unknown[] }) => void

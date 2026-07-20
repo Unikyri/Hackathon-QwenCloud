@@ -33,6 +33,8 @@ vi.mock('../pages/MemoryInspectorPage', () => ({ default: () => <div>Memory rout
 vi.mock('../pages/ReviewPage', () => ({ default: () => <div>Review route</div> }))
 vi.mock('../pages/WriterProfilePage', () => ({ default: () => <div>Writer profile route</div> }))
 vi.mock('../pages/IntegrationsPage', () => ({ default: () => <div>Integrations route</div> }))
+// C: SkillsPage is now a real route, not a redirect — mock it so route tests can render it.
+vi.mock('../pages/SkillsPage', () => ({ default: () => <div>Skills route</div> }))
 
 function LocationProbe() {
   const location = useLocation()
@@ -68,8 +70,9 @@ describe('App legacy universe routes', () => {
     ['explore entity (removed EntitiesPage)', '/universe/uni-1/explore/entities/entity-1', '/universe/uni-1/explore/map?entity=entity-1'],
     ['contradictions', '/universe/uni-1/contradictions', '/universe/uni-1/review/issues'],
     ['plot holes', '/universe/uni-1/plot-holes', '/universe/uni-1/review/issues'],
-    ['skills', '/universe/uni-1/skills', '/universe/uni-1/review/issues'],
-    ['review skills (removed SkillsPage)', '/universe/uni-1/review/skills', '/universe/uni-1/review/issues'],
+    // C: /skills is now its own route (SkillsPage), NOT a redirect. Kept here only
+    // so the original list stays full — this entry now verifies the route stays
+    // at the skills path rather than redirecting away.
     ['panorama', '/universe/uni-1/panorama', '/dashboard'],
     ['universe wildcard', '/universe/uni-1/not-a-real-route', '/universe/uni-1/write'],
   ])('redirects legacy %s route to the canonical destination', async (_name, legacyPath, expectedPath) => {
@@ -88,6 +91,15 @@ describe('App legacy universe routes', () => {
     })
     expect(mockGetWork).toHaveBeenCalledWith('work-1')
   })
+
+  it('renders SkillsPage (not a redirect) for /skills', async () => {
+    // C: /skills was previously a redirect to /review/issues. It now renders the
+    // real Skills activation surface. Verify the route stays at the skills path.
+    renderRoute('/universe/uni-1/skills')
+    await waitFor(() => expect(screen.getByText('Skills route')).toBeInTheDocument())
+    expect(screen.getByTestId('route-location')).toHaveTextContent('/universe/uni-1/skills')
+  })
+
 })
 
 describe('App account-scoped routes', () => {

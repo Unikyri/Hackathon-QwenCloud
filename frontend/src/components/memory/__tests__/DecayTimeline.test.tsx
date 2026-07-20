@@ -19,7 +19,7 @@ beforeEach(() => {
 })
 
 describe('DecayTimeline', () => {
-  it('renders one polyline per entity plus a threshold line', async () => {
+  it('renders one sparkline row per entity', async () => {
     getMemoryStatus.mockResolvedValue({
       consolidated_count: 0,
       entities: [
@@ -45,10 +45,11 @@ describe('DecayTimeline', () => {
 
     render(<DecayTimeline universeId="u1" />)
 
-    await waitFor(() => expect(screen.getByTestId('decay-timeline-svg')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument())
+    expect(screen.getByText('Bob')).toBeInTheDocument()
     expect(screen.getByTestId('decay-polyline-e1')).toBeInTheDocument()
     expect(screen.getByTestId('decay-polyline-e2')).toBeInTheDocument()
-    expect(screen.getByTestId('decay-threshold-line')).toBeInTheDocument()
+    expect(screen.getByTestId('decay-threshold-e1')).toBeInTheDocument()
   })
 
   it('renders empty state without crashing when there are no entities', async () => {
@@ -57,7 +58,7 @@ describe('DecayTimeline', () => {
     render(<DecayTimeline universeId="u1" />)
 
     await waitFor(() => expect(screen.getByText(/no entity lifecycle data yet/i)).toBeInTheDocument())
-    expect(screen.queryByTestId('decay-timeline-svg')).not.toBeInTheDocument()
+    expect(screen.queryByTestId(/decay-sparkline-/)).not.toBeInTheDocument()
   })
 
   it('renders a dot instead of a polyline for a single-point history', async () => {
@@ -74,12 +75,12 @@ describe('DecayTimeline', () => {
 
     render(<DecayTimeline universeId="u1" />)
 
-    await waitFor(() => expect(screen.getByTestId('decay-timeline-svg')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('decay-sparkline-e3')).toBeInTheDocument())
     expect(screen.queryByTestId('decay-polyline-e3')).not.toBeInTheDocument()
     expect(screen.getByTestId('decay-dot-e3')).toBeInTheDocument()
   })
 
-  it('does not render crossing markers when the entity never crosses the threshold', async () => {
+  it('does not render a crossing marker when the entity never crosses the threshold', async () => {
     getMemoryStatus.mockResolvedValue({
       consolidated_count: 0,
       entities: [
@@ -96,7 +97,7 @@ describe('DecayTimeline', () => {
 
     render(<DecayTimeline universeId="u1" />)
 
-    await waitFor(() => expect(screen.getByTestId('decay-timeline-svg')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('decay-sparkline-e4')).toBeInTheDocument())
     expect(screen.queryByTestId(/decay-marker-e4-/)).not.toBeInTheDocument()
   })
 
@@ -117,8 +118,7 @@ describe('DecayTimeline', () => {
 
     render(<DecayTimeline universeId="u1" />)
 
-    await waitFor(() => expect(screen.getByTestId('decay-timeline-svg')).toBeInTheDocument())
-    expect(screen.getByTestId('decay-marker-e5-archive-1')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('decay-marker-e5-archive')).toBeInTheDocument())
   })
 
   it('runs a decay sweep and refetches memory-status when requested', async () => {
@@ -144,6 +144,36 @@ describe('DecayTimeline', () => {
 
     await waitFor(() => expect(runDecay).toHaveBeenCalledWith('u1'))
     await waitFor(() => expect(getMemoryStatus).toHaveBeenCalledTimes(2))
+  })
+
+  it('puts the sweep button on cooldown after it runs, so spam-clicking cannot compound decay', async () => {
+    getMemoryStatus.mockResolvedValue({
+      consolidated_count: 0,
+      entities: [
+        {
+          id: 'e1', name: 'Alice', type: 'character', relevance_score: 0.6, status: 'active',
+          consolidated: false, lifecycle: 'active',
+          history: [{ score: 0.6, recorded_at: '2026-07-01T00:00:00Z' }],
+        },
+      ],
+    })
+    runDecay.mockResolvedValue({ ok: true })
+
+    render(<DecayTimeline universeId="u1" />)
+    await waitFor(() => expect(getMemoryStatus).toHaveBeenCalledTimes(1))
+
+    const button = screen.getByRole('button', { name: /run a decay sweep/i })
+    button.click()
+    await waitFor(() => expect(runDecay).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(getMemoryStatus).toHaveBeenCalledTimes(2))
+
+    // Spam-clicking right after a sweep must not fire a second one — this is
+    // the exact behavior that let relevance get hammered to near-zero by
+    // repeated clicks during a demo.
+    const cooldownButton = await screen.findByRole('button', { name: /sweep again shortly/i })
+    expect(cooldownButton).toBeDisabled()
+    cooldownButton.click()
+    expect(runDecay).toHaveBeenCalledTimes(1)
   })
 
   it('shows a retryable error when lifecycle data cannot be loaded', async () => {
@@ -182,7 +212,7 @@ describe('DecayTimeline', () => {
 
     view.rerender(<DecayTimeline universeId="u2" />)
     await waitFor(() => expect(getMemoryStatus).toHaveBeenCalledWith('u2'))
-    await waitFor(() => expect(screen.getByText(/new universe entity: active/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('New universe entity')).toBeInTheDocument())
 
     resolveFirstRequest!({
       consolidated_count: 0,
@@ -193,7 +223,7 @@ describe('DecayTimeline', () => {
     })
 
     await Promise.resolve()
-    expect(screen.getByText(/new universe entity: active/i)).toBeInTheDocument()
+    expect(screen.getByText('New universe entity')).toBeInTheDocument()
     expect(screen.queryByText(/old universe entity/i)).not.toBeInTheDocument()
   })
 })

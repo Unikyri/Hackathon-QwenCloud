@@ -15,11 +15,23 @@ vi.mock('react-router-dom', async () => {
 })
 
 const mockDemoLogin = vi.fn()
+const mockRegister = vi.fn()
+// A: authStore mock expanded with isAuthenticated + register for startDemoFromScratch.
 vi.mock('../../stores/authStore', () => ({
-  useAuthStore: vi.fn((selector?: (state: { demoLogin: typeof mockDemoLogin }) => unknown) => {
-    const state = { demoLogin: mockDemoLogin }
+  useAuthStore: vi.fn((selector?: (state: {
+    demoLogin: typeof mockDemoLogin
+    isAuthenticated: boolean
+    register: typeof mockRegister
+  }) => unknown) => {
+    const state = { demoLogin: mockDemoLogin, isAuthenticated: false, register: mockRegister }
     return selector ? selector(state) : state
   }),
+}))
+
+// A: useDemoProvisioning calls api.createUniverse for the scratch flow.
+const mockCreateUniverse = vi.fn()
+vi.mock('../../lib/api', () => ({
+  api: { createUniverse: (...args: unknown[]) => mockCreateUniverse(...args) },
 }))
 
 function renderPage() {
@@ -37,15 +49,29 @@ describe('LandingPage', () => {
     vi.clearAllMocks()
   })
 
-  it('registers a disposable account, clones the demo universe, and redirects to its Write screen', async () => {
+  it('A: "Jump into a finished universe" clones the demo and redirects to its Write screen', async () => {
     mockDemoLogin.mockResolvedValueOnce('demo-universe-7')
     renderPage()
 
-    fireEvent.click(screen.getByRole('button', { name: /try the live demo/i }))
+    // A: secondary CTA triggers the clone (startDemo) path
+    fireEvent.click(screen.getByRole('button', { name: /jump into a finished universe/i }))
 
     await waitFor(() => {
       expect(mockDemoLogin).toHaveBeenCalledTimes(1)
       expect(mockNavigate).toHaveBeenCalledWith('/universe/demo-universe-7/write')
+    })
+  })
+
+  it('A: "Start from scratch" creates an empty universe and opens the import drawer', async () => {
+    mockRegister.mockResolvedValueOnce(undefined)
+    mockCreateUniverse.mockResolvedValueOnce({ universe: { id: 'scratch-uni-1' } })
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: /start from scratch/i }))
+
+    await waitFor(() => {
+      expect(mockCreateUniverse).toHaveBeenCalledWith(expect.objectContaining({ name: 'The Shattered Compact' }))
+      expect(mockNavigate).toHaveBeenCalledWith('/universe/scratch-uni-1/write?panel=import')
     })
   })
 
@@ -55,3 +81,4 @@ describe('LandingPage', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/login')
   })
 })
+

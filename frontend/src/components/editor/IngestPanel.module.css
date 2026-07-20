@@ -63,6 +63,27 @@
 .continueButton:hover,
 .continueButton:focus-visible { background: var(--teal-deep); }
 
+.sampleButton {
+  width: 100%;
+  border: 1px solid var(--teal);
+  border-radius: var(--r-lg);
+  background: var(--teal-soft);
+  color: var(--teal-deep);
+  font: 600 13.5px var(--sans);
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.sampleButton:hover:not(:disabled) { background: var(--teal-soft-12); }
+.sampleButton:disabled { cursor: progress; opacity: 0.7; }
+
+.sampleHint {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  margin: 8px 0 16px;
+}
+
 /* Drop zone */
 .dropzone {
   border: 2px dashed var(--line-strong);

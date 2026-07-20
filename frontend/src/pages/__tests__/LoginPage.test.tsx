@@ -32,6 +32,12 @@ vi.mock('../../stores/authStore', () => ({
   ),
 }))
 
+// A: useDemoProvisioning now calls api.createUniverse for the scratch flow.
+const mockCreateUniverse = vi.fn()
+vi.mock('../../lib/api', () => ({
+  api: { createUniverse: (...args: unknown[]) => mockCreateUniverse(...args) },
+}))
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={['/login']}>
@@ -52,9 +58,12 @@ describe('LoginPage', () => {
     expect(screen.getAllByRole('button', { name: /sign in/i }).length).toBeGreaterThanOrEqual(1)
   })
 
-  it('renders demo button', () => {
+  it('A: renders both demo buttons with the correct labels', () => {
     renderPage()
-    expect(screen.getByRole('button', { name: /try the demo/i })).toBeInTheDocument()
+    // Primary CTA — starts from scratch
+    expect(screen.getByRole('button', { name: /see it build/i })).toBeInTheDocument()
+    // Secondary CTA — clones a finished universe
+    expect(screen.getByRole('button', { name: /skip ahead/i })).toBeInTheDocument()
   })
 
   it('submits login and navigates to dashboard', async () => {
@@ -84,7 +93,8 @@ describe('LoginPage', () => {
     mockDemoLogin.mockResolvedValueOnce('demo-universe-42')
     renderPage()
 
-    fireEvent.click(screen.getByRole('button', { name: /try the demo/i }))
+    // A: "Skip ahead" button triggers the clone path (old startDemo)
+    fireEvent.click(screen.getByRole('button', { name: /skip ahead/i }))
 
     await waitFor(() => {
       expect(mockDemoLogin).toHaveBeenCalled()
@@ -99,10 +109,12 @@ describe('LoginPage', () => {
     mockDemoLogin.mockRejectedValueOnce(new Error('Demo unavailable'))
     renderPage()
 
-    fireEvent.click(screen.getByRole('button', { name: /try the demo/i }))
+    // A: "Skip ahead" button triggers the clone path; error must surface inline.
+    fireEvent.click(screen.getByRole('button', { name: /skip ahead/i }))
 
     await waitFor(() => {
       expect(screen.getByText('Demo unavailable')).toBeInTheDocument()
     })
   })
 })
+

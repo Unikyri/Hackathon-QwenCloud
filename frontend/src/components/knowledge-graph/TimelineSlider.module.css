@@ -104,7 +104,9 @@
 .step:disabled { cursor: default; opacity: 0.4; }
 
 .eventCard { display: grid; gap: 6px; }
-.eventLabel { margin: 0; color: var(--ink); font-family: var(--serif); font-size: 15px; font-weight: 500; }
+.eventHeader { display: flex; align-items: baseline; gap: 10px; }
+.eventTitle { margin: 0; color: var(--ink); font-family: var(--serif); font-size: 15px; font-weight: 500; }
+.eventTime { color: var(--muted-2); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.03em; white-space: nowrap; }
 .eventDescription { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 
 .participants { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }

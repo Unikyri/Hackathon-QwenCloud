@@ -3,98 +3,153 @@ import cytoscape, {
   type Core,
   type ElementDefinition,
   type LayoutOptions,
+  type NodeSingular,
   type StylesheetJson,
 } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import { useGraphStore } from '../../stores/graphStore'
 import { GRAPH_RENDER_EDGE_LIMIT, GRAPH_RENDER_NODE_LIMIT, toCytoscapeElements } from '../../lib/graphElements'
+import { ENTITY_TYPE_META } from '../../lib/entityTypes'
 import styles from './GraphCanvas.module.css'
 
 cytoscape.use(fcose)
+
+// Redesign (round 2 — the opacity/border-width nudges in the previous pass
+// were confirmed, by inspecting Cytoscape's actual node data, to be a
+// legibility problem, not a data/logic bug: focal:true and hop:0 were
+// already on the right node, the rectangle-with-thin-border-on-near-white
+// look just made every non-focal node unreadable regardless. Filled-circle
+// nodes with real color contrast, no permanent label (name shows on hover —
+// the entity list already gives every name), and a large, unmistakable
+// focal ring fix the actual problem instead of tuning the old approach
+// further.
+// Cytoscape's JS-object stylesheet does not resolve CSS custom properties
+// (confirmed by rendering: every node fell back to the same flat gray) —
+// these must be the literal hex values behind the app's --node-*/--accent-live
+// tokens in index.css, not var(...) references.
+const NODE_FILL: Record<string, string> = {
+  character: '#155e58',
+  place: '#4d8069',
+  object: '#8a5d00',
+  faction: '#52605b',
+  event: '#8a5d00',
+  world_rule: '#337c73',
+  plot_arc: '#a23d33',
+}
+
+// The app's node-type palette (--node-character/--node-place/--node-faction/…)
+// was designed for thin borders on a near-white card, not solid fills read on
+// their own — several types (character/place/faction) are all dark, low-
+// saturation greens and are hard to tell apart by hue alone once color is the
+// *only* type signal (no permanent label). Reusing each type's existing glyph
+// (ENTITY_TYPE_META, already used by the filter legend) as the node's label
+// gives type a shape signal independent of hue, instead of re-tuning the palette.
+const NODE_GLYPH: Record<string, string> = Object.fromEntries(
+  Object.entries(ENTITY_TYPE_META).map(([type, meta]) => [type, meta.glyph]),
+)
+
+function nodeGlyph(node: NodeSingular): string {
+  return NODE_GLYPH[node.data('entityType') as string] || '?'
+}
 
 const style: StylesheetJson = [
   {
     selector: 'node',
     style: {
-      label: 'data(label)',
-      shape: 'round-rectangle',
-      width: 'label',
-      height: 'label',
-      padding: '18px',
-      'background-color': '#fffefa',
-      'border-width': 2.5,
-      'border-color': '#52605b',
-      color: '#192321',
-      'font-family': 'Spline Sans, system-ui, sans-serif',
+      shape: 'ellipse',
+      width: 36,
+      height: 36,
+      'background-color': '#7c8b85',
+      // A light halo separates each solid-color node from the canvas and
+      // from overlapping neighbors — without it, same-family colors
+      // (e.g. the two green-ish types) blur together at a glance.
+      'border-width': 2,
+      'border-color': '#edf0ea',
+      // Type glyph inside the node — a shape cue that survives even when
+      // two types render similar colors (see NODE_GLYPH above).
+      label: nodeGlyph as unknown as string,
+      color: '#fffefa',
       'font-size': 13,
-      'font-weight': 600,
-      'text-wrap': 'wrap',
-      'text-max-width': '150px',
       'text-valign': 'center',
       'text-halign': 'center',
       'overlay-opacity': 0,
     },
   },
-  {
-    selector: 'node[entityType = "character"]',
-    style: { 'border-color': '#155e58' },
-  },
-  {
-    selector: 'node[entityType = "place"]',
-    style: { 'border-color': '#4d8069' },
-  },
-  {
-    selector: 'node[entityType = "object"]',
-    style: { 'border-color': '#8a5d00' },
-  },
-  {
-    selector: 'node[entityType = "faction"]',
-    style: { 'border-color': '#52605b' },
-  },
-  {
-    selector: 'node[entityType = "event"]',
-    style: { 'border-color': '#8a5d00' },
-  },
-  {
-    selector: 'node[entityType = "world_rule"]',
-    style: { 'border-color': '#337c73' },
-  },
-  {
-    selector: 'node[entityType = "plot_arc"]',
-    style: { 'border-color': '#a23d33' },
-  },
-  {
-    selector: 'node[focal]',
-    style: {
-      'border-width': 3,
-      'background-color': '#f1f3ee',
-    },
-  },
-  // Ego-graph hop styling: degree-2 nodes read as peripheral context — same
-  // shape and color language as degree-1, just quieter — so the eye lands on
-  // the focal entity and its direct neighbors first.
+  ...Object.entries(NODE_FILL).map(([entityType, color]) => ({
+    selector: `node[entityType = "${entityType}"]`,
+    style: { 'background-color': color },
+  })),
+  // Second-degree nodes read as peripheral context — smaller reads as
+  // "further away" on its own; unlike the old thin-border design, the
+  // color fill is still fully opaque so a small node is still identifiable
+  // by type at a glance, not just fainter.
   {
     selector: 'node[hop = 2]',
     style: {
-      'font-size': 10.5,
-      'border-width': 1.5,
-      opacity: 0.75,
+      width: 24,
+      height: 24,
+    },
+  },
+  // Name appears on hover/selection only — every entity is already listed
+  // by name in the left rail; the map's job is the shape of relationships,
+  // not repeating 20 labels on top of each other.
+  {
+    selector: 'node.hovered, node:selected',
+    style: {
+      label: 'data(label)',
+      'font-family': 'Spline Sans, system-ui, sans-serif',
+      'font-size': 12,
+      'font-weight': 600,
+      color: '#192321',
+      'text-valign': 'bottom',
+      'text-margin-y': 6,
+      'text-background-color': '#fffefa',
+      'text-background-opacity': 1,
+      'text-background-padding': '3px',
+      'text-border-width': 1,
+      'text-border-color': 'rgba(25, 35, 33, 0.2)',
+      'text-border-opacity': 1,
+      'z-index': 30,
     },
   },
   {
     selector: 'node:selected',
     style: {
+      'border-width': 4,
       'border-color': '#0c6a85',
-      'background-color': '#e7f0ee',
+    },
+  },
+  // The focal entity: the one node that must be unmistakable without
+  // hovering or reading a legend. Large, and ringed in the accent reserved
+  // app-wide for "this is the thing the system is actively centered on"
+  // (same token the Editor's live-pipeline/context-budget numbers use).
+  // Declared AFTER node:selected so the focal ring wins over the generic
+  // selected-border color on the common case where the focal node is also
+  // the selected one (fetchGraph/focusNode always select the new focal).
+  // `[?focal]` (existential-truthy), NOT `[focal]` — toCytoscapeElements
+  // always sets `focal` to a real boolean (true or false, never undefined),
+  // so every node HAS the field; `[focal]` only checks the field exists and
+  // matched every node regardless of its value, ringing the entire graph in
+  // the "focal" style instead of just the one focal node. Confirmed via
+  // Cytoscape's actual computed style before/after this change.
+  {
+    selector: 'node[?focal]',
+    style: {
+      width: 52,
+      height: 52,
+      'border-width': 5,
+      'border-color': '#605198',
+      'z-index': 20,
     },
   },
   {
     selector: 'edge',
     style: {
-      width: 2,
-      'line-color': '#7c8b85',
-      'target-arrow-color': '#7c8b85',
+      width: 1.8,
+      'line-color': '#8b968f',
+      'target-arrow-color': '#8b968f',
       'target-arrow-shape': 'triangle',
+      'arrow-scale': 0.8,
       'curve-style': 'bezier',
       label: '',
       'overlay-opacity': 0,
@@ -116,17 +171,17 @@ const style: StylesheetJson = [
   {
     selector: 'edge[edgeTier = 1]',
     style: {
-      width: 2,
-      'line-color': '#7c8b85',
-      'target-arrow-color': '#7c8b85',
+      width: 1.8,
+      'line-color': '#63706a',
+      'target-arrow-color': '#63706a',
     },
   },
   {
     selector: 'edge[edgeTier = 2]',
     style: {
-      width: 1.5,
-      'line-color': '#b7bdb8',
-      'target-arrow-color': '#b7bdb8',
+      width: 1.4,
+      'line-color': '#8b968f',
+      'target-arrow-color': '#8b968f',
       'line-style': 'dashed',
     },
   },
@@ -139,16 +194,32 @@ const style: StylesheetJson = [
       'line-style': 'solid',
     },
   },
+  // Relationship type appears on hover/selection only, same reasoning as
+  // node labels — the map defaults to shape, detail comes on demand.
+  {
+    selector: 'edge.hovered, edge:selected',
+    style: {
+      label: 'data(relationshipType)',
+      'font-family': 'Spline Sans, system-ui, sans-serif',
+      'font-size': 10,
+      'font-weight': 600,
+      color: '#192321',
+      'text-background-color': '#fffefa',
+      'text-background-opacity': 1,
+      'text-background-padding': '2px',
+      'text-rotation': 'autorotate',
+    },
+  },
   // Applied/removed imperatively by the eventHighlightIds effect below, not
   // part of element data — dimming must not trigger a re-layout (see that
   // effect for why it's driven by classes instead of a data field).
   {
     selector: 'node.dimmed',
-    style: { opacity: 0.25 },
+    style: { opacity: 0.2 },
   },
   {
     selector: 'edge.dimmed',
-    style: { opacity: 0.12 },
+    style: { opacity: 0.08 },
   },
 ]
 
@@ -210,6 +281,9 @@ export default function GraphCanvas() {
       boxSelectionEnabled: false,
       minZoom: 0.2,
       maxZoom: 2,
+      // D1: default wheelSensitivity is 1 (very slow); 3 makes zooming feel
+      // responsive without being jumpy. Tune between 2–4 by feel if needed.
+      wheelSensitivity: 3,
     })
     cyRef.current = cy
 
@@ -227,6 +301,14 @@ export default function GraphCanvas() {
         callbacksRef.current.selectEdge(null)
       }
     })
+
+    // Nodes/edges carry no permanent label (see stylesheet above) — hover
+    // reveals the name/relationship type via the `.hovered` class instead,
+    // so the map stays a shape at rest and a name/relationship on demand.
+    cy.on('mouseover', 'node', (event) => event.target.addClass('hovered'))
+    cy.on('mouseout', 'node', (event) => event.target.removeClass('hovered'))
+    cy.on('mouseover', 'edge', (event) => event.target.addClass('hovered'))
+    cy.on('mouseout', 'edge', (event) => event.target.removeClass('hovered'))
 
     const resizeObserver = new ResizeObserver(() => cy.resize())
     resizeObserver.observe(container)

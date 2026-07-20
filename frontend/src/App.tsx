@@ -19,6 +19,7 @@ const EditorPage = lazy(() => import('./pages/EditorPage'))
 const KnowledgeGraphPage = lazy(() => import('./pages/KnowledgeGraphPage'))
 const MemoryInspectorPage = lazy(() => import('./pages/MemoryInspectorPage'))
 const ReviewPage = lazy(() => import('./pages/ReviewPage'))
+const SkillsPage = lazy(() => import('./pages/SkillsPage'))
 const WriterProfilePage = lazy(() => import('./pages/WriterProfilePage'))
 const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'))
 
@@ -63,6 +64,14 @@ function MapRoute() {
   )
 }
 
+function SkillsRoute() {
+  return (
+    <RouteLoadBoundary label="Loading skills…">
+      <SkillsPage />
+    </RouteLoadBoundary>
+  )
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" />
@@ -91,9 +100,10 @@ export function AppRoutes() {
           <Route path="explore/timeline" element={<ToExplore />} />
           <Route path="memory" element={<RouteLoadBoundary label="Loading memory…"><MemoryInspectorPage /></RouteLoadBoundary>} />
           <Route path="review/:view" element={<RouteLoadBoundary label="Loading review…"><ReviewPage /></RouteLoadBoundary>} />
-          {/* SkillsPage was removed as a duplicate skill-config surface (CraftReviewPanel's
-              inline picker is the only one now); legacy links redirect to Conflicts. */}
-          <Route path="review/skills" element={<ToReview view="issues" />} />
+          {/* C: SkillsPage re-added as its own activation surface (turn skills on/off
+              for the universe). CraftReviewPanel's inline picker is kept as the
+              per-passage skill-*selection* surface — they serve different jobs. */}
+          <Route path="skills" element={<SkillsRoute />} />
 
           {/* Legacy universe-scoped deep links remain explicit redirects while their
               content is consolidated by the Write, Explore, and Review work. */}

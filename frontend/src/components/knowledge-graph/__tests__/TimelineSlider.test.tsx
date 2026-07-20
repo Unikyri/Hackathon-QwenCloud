@@ -27,7 +27,7 @@ describe('TimelineSlider', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('sorts events by timeline_position and shows the first event by default, highlighting its participants', async () => {
+  it('sorts events by timeline_position and shows the first event by default, without dimming the map', async () => {
     mockGetTimeline.mockResolvedValue({
       events: [
         { id: 'e2', title: 'The Battle', timeline_position: 2, participants: [] },
@@ -40,7 +40,10 @@ describe('TimelineSlider', () => {
       expect(screen.getByText('The Prologue')).toBeInTheDocument()
     })
     expect(screen.getByText('1 / 2')).toBeInTheDocument()
-    expect(useGraphStore.getState().eventHighlightIds).toEqual(['entity-1'])
+    // Landing on the map is not the same as picking an event — highlighting
+    // (and dimming every other node) only starts once the writer actually
+    // steps through the timeline, not from the default first-event render.
+    expect(useGraphStore.getState().eventHighlightIds).toBeNull()
   })
 
   it('steps to the next tick and resolves a known participant to its display name', async () => {
@@ -83,6 +86,19 @@ describe('TimelineSlider', () => {
 
     expect(screen.getByText('The Epilogue')).toBeInTheDocument()
     expect(screen.getByText('3 / 3')).toBeInTheDocument()
+  })
+
+  it('shows the event title and its timeline_label as a separate time badge, not one in place of the other', async () => {
+    mockGetTimeline.mockResolvedValue({
+      events: [{
+        id: 'e1', title: 'The First Echo Discovered', timeline_position: -312,
+        timeline_label: '312 YS', description: 'The Crown secretly discovers the First Echo.', participants: [],
+      }],
+    })
+    render(<TimelineSlider universeId="uni-1" />)
+
+    await waitFor(() => expect(screen.getByText('The First Echo Discovered')).toBeInTheDocument())
+    expect(screen.getByText('312 YS')).toBeInTheDocument()
   })
 
   it('falls back to a shortened ID for a participant outside the loaded graph', async () => {

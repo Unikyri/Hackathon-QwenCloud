@@ -163,7 +163,30 @@ describe('KnowledgeGraphPage', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('application', { name: /story relationship map/i })).toBeInTheDocument()
-      expect(screen.getByRole('checkbox', { name: 'Toggle Character entities' })).toBeInTheDocument()
+      expect(screen.getByRole('checkbox', { name: 'Show archived entities' })).toBeInTheDocument()
+    })
+  })
+
+  it('filters the canvas from the sidebar type chip, not a separate header control', async () => {
+    mockListEntities.mockResolvedValue({ entities: [{ id: 'n1', name: 'Alice', type: 'character' }], counts_by_type: { ...emptyCounts, character: 1, place: 2 }, pagination: { total: 1 } })
+    mockGetEntityNeighbors.mockResolvedValue({
+      nodes: [aliceNode()],
+      edges: [],
+      truncated: false,
+      limits: graphLimits,
+    })
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('application', { name: /story relationship map/i })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /^Places \(2\)$/ }))
+
+    await waitFor(() => {
+      const filter = useGraphStore.getState().nodeFilter
+      expect(filter.place).toBe(true)
+      expect(filter.character).toBe(false)
     })
   })
 

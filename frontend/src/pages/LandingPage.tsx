@@ -57,9 +57,9 @@ const steps = [
 export default function LandingPage() {
   const navigate = useNavigate()
   const featureCardsRef = useRef<(HTMLDivElement | null)[]>([])
-  // ponytail: error surfacing skipped — no spec scenario requires it here;
-  // add an inline message if a real failure case shows up in the demo.
-  const { startDemo, pending: demoPending } = useDemoProvisioning()
+  // ponytail: error surfacing kept minimal — a judge with a failure should
+  // see the error text inline without a full error page.
+  const { startDemo, startDemoFromScratch, pending: demoPending, pendingScratch, error: demoError } = useDemoProvisioning()
 
   // ponytail: IntersectionObserver for scroll-triggered reveals (replaces GSAP ScrollTrigger)
   useEffect(() => {
@@ -171,14 +171,32 @@ export default function LandingPage() {
             and lore rule, and watches for contradictions while you write. For writers,
             screenwriters, and mangaka who never want to forget anything again.
           </p>
+          {/* A: Two-button demo choice:
+              (1) start from scratch — creates an empty universe and opens the
+                  import drawer so a judge sees ingestion happen live;
+              (2) jump into a finished universe — old clone path, instant.
+          */}
           <div className={styles.heroCtas}>
-            <button className={styles.heroCta} onClick={() => void startDemo()} disabled={demoPending}>
-              {demoPending ? 'Setting up your demo…' : 'Try the live demo'}
+            <button
+              className={styles.heroCta}
+              onClick={() => void startDemoFromScratch()}
+              disabled={pendingScratch || demoPending}
+            >
+              {pendingScratch ? 'Creating universe…' : 'Start from scratch — see it build'}
             </button>
-            <button className={styles.heroCtaGhost} onClick={() => scrollTo('how')}>
-              See how it works
+            <button
+              className={styles.heroCtaGhost}
+              onClick={() => void startDemo()}
+              disabled={demoPending || pendingScratch}
+            >
+              {demoPending ? 'Loading demo…' : 'Jump into a finished universe'}
             </button>
           </div>
+          {demoError && (
+            <p role="alert" style={{ color: 'var(--gold)', marginTop: '12px', fontSize: '13px' }}>
+              {demoError}
+            </p>
+          )}
         </div>
       </section>
 

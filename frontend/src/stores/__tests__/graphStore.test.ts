@@ -334,6 +334,27 @@ describe('graphStore', () => {
     })
   })
 
+  describe('setSingleTypeFilter', () => {
+    it('shows only the selected type and hides every other type', () => {
+      getStore().setSingleTypeFilter('place')
+      const filter = getStore().nodeFilter
+      expect(filter.place).toBe(true)
+      expect(filter.character).toBe(false)
+      expect(filter.faction).toBe(false)
+      expect(filter.object).toBe(false)
+      expect(filter.event).toBe(false)
+    })
+
+    it('restores every type when "All" is selected', () => {
+      getStore().setSingleTypeFilter('place')
+      getStore().setSingleTypeFilter('All')
+      const filter = getStore().nodeFilter
+      expect(filter.place).toBe(true)
+      expect(filter.character).toBe(true)
+      expect(filter.faction).toBe(true)
+    })
+  })
+
   describe('toggleArchived', () => {
     it('shows archived entities only when explicitly enabled', () => {
       getStore().toggleArchived()
